@@ -1,0 +1,14 @@
+{
+  "name": "Serata Ludica",
+  "short_name": "Serata",
+  "description": "Disponibilità, giochi, classifica e storico della serata ludica.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#4f46e5",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

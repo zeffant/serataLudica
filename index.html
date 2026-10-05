@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';">
+  <title>Serata Ludica</title>
+  <meta name="description" content="Disponibilità, proposte di giochi, classifica e storico della serata ludica.">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <noscript>Per usare Serata Ludica è necessario abilitare JavaScript.</noscript>
+
+  <div id="setup-banner" class="setup-banner hidden" role="alert">
+    Configurazione incompleta: compila <code>config.js</code> con URL e chiave anon di Supabase.
+  </div>
+
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Organizza · Vota · Gioca</p>
+      <h1>🎲 Serata Ludica</h1>
+    </div>
+    <button id="refresh-button" class="icon-button" type="button" aria-label="Aggiorna dati" title="Aggiorna dati">↻</button>
+  </header>
+
+  <main id="app" class="app-shell" aria-busy="true">
+    <section class="week-picker card" aria-labelledby="week-heading">
+      <div>
+        <span id="week-heading" class="field-label">Settimana selezionata</span>
+        <strong id="week-label">—</strong>
+      </div>
+      <div class="week-controls">
+        <button id="previous-week" class="secondary-button compact" type="button" aria-label="Settimana precedente">‹</button>
+        <label class="week-input-label">
+          <span class="sr-only">Scegli settimana</span>
+          <input id="week-input" type="week">
+        </label>
+        <button id="current-week" class="secondary-button compact" type="button">Oggi</button>
+        <button id="next-week" class="secondary-button compact" type="button" aria-label="Settimana successiva">›</button>
+      </div>
+    </section>
+
+    <div id="player-banner" class="player-banner card">
+      <div>
+        <span class="field-label">Giocatore selezionato</span>
+        <strong id="current-player-name">Nessuno</strong>
+      </div>
+      <button id="go-to-player" class="secondary-button" type="button">Seleziona</button>
+    </div>
+
+    <section id="tab-votes" class="tab-panel active" data-tab-panel="votes" aria-labelledby="nav-votes">
+      <div class="section-heading">
+        <div><p class="eyebrow">La tua disponibilità</p><h2>Vota i giorni</h2></div>
+      </div>
+      <p class="hint">Scegli Sì, Forse o No per ciascun giorno. Puoi cambiare voto in qualsiasi momento.</p>
+      <div id="vote-days" class="day-list" aria-live="polite"></div>
+    </section>
+
+    <section id="tab-summary" class="tab-panel" data-tab-panel="summary" aria-labelledby="nav-summary" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Panoramica del gruppo</p><h2>Riepilogo voti</h2></div>
+      </div>
+      <div id="summary-content" class="summary-wrap" aria-live="polite"></div>
+    </section>
+
+    <section id="tab-games" class="tab-panel" data-tab-panel="games" aria-labelledby="nav-games" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Idee per la serata</p><h2>Giochi proposti</h2></div>
+      </div>
+      <form id="proposal-form" class="card form-stack">
+        <h3>Proponi un gioco</h3>
+        <label>Titolo<input id="proposal-title" name="title" required maxlength="120" autocomplete="off"></label>
+        <label>Link BoardGameGeek<input id="proposal-url" name="bgg_url" type="url" required placeholder="https://boardgamegeek.com/boardgame/…" inputmode="url"></label>
+        <label>Nota facoltativa<textarea id="proposal-notes" name="notes" rows="2" maxlength="500"></textarea></label>
+        <button class="primary-button" type="submit">Aggiungi proposta</button>
+        <p id="proposal-player-hint" class="hint"></p>
+      </form>
+      <div id="proposal-list" class="stack-list" aria-live="polite"></div>
+    </section>
+
+    <section id="tab-ranking" class="tab-panel" data-tab-panel="ranking" aria-labelledby="nav-ranking" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Risultati complessivi</p><h2>Classifica</h2></div>
+      </div>
+      <p class="hint">Ordine: più vittorie, poi meno ultimi posti. Ogni nuovo giocatore parte da zero.</p>
+      <div id="ranking-content" class="table-card" aria-live="polite"></div>
+    </section>
+
+    <section id="tab-history" class="tab-panel" data-tab-panel="history" aria-labelledby="nav-history" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Serate concluse</p><h2>Storico</h2></div>
+      </div>
+      <div id="result-admin-panel" class="card form-stack hidden">
+        <h3>Registra risultato</h3>
+        <form id="result-form" class="form-stack">
+          <label>Data<input id="result-date" name="played_on" type="date" required></label>
+          <label>Gioco<input id="result-game" name="game_name" required maxlength="120"></label>
+          <label>Link BoardGameGeek facoltativo<input id="result-url" name="bgg_url" type="url" placeholder="https://boardgamegeek.com/boardgame/…"></label>
+          <div class="two-columns">
+            <label>Vincitore<select id="result-winner" name="winner_player_id" required></select></label>
+            <label>Ultimo classificato<select id="result-last" name="last_player_id" required></select></label>
+          </div>
+          <label>Note facoltative<textarea id="result-notes" name="notes" rows="2" maxlength="500"></textarea></label>
+          <button class="primary-button" type="submit">Registra</button>
+        </form>
+      </div>
+      <div id="history-list" class="stack-list" aria-live="polite"></div>
+    </section>
+
+    <section id="tab-players" class="tab-panel" data-tab-panel="players" aria-labelledby="nav-players" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Identità e amministrazione</p><h2>Giocatori</h2></div>
+      </div>
+
+      <div id="claim-panel" class="card form-stack">
+        <h3>Seleziona il tuo giocatore</h3>
+        <p class="hint">La scelta viene associata in modo sicuro a questo accesso anonimo. Se sbagli, un amministratore può liberarla.</p>
+        <label>Giocatore<select id="player-select"></select></label>
+        <button id="claim-player-button" class="primary-button" type="button">Conferma giocatore</button>
+      </div>
+
+      <div id="admin-login-panel" class="card form-stack">
+        <h3>Amministrazione</h3>
+        <form id="admin-login-form" class="form-stack">
+          <label>PIN amministratore<input id="admin-pin" name="pin" type="password" required minlength="12" autocomplete="current-password"></label>
+          <button class="secondary-button" type="submit">Accedi</button>
+        </form>
+      </div>
+
+      <div id="admin-player-panel" class="hidden">
+        <div class="card form-stack">
+          <div class="section-heading inline"><h3>Gestione giocatori</h3><button id="admin-logout" class="text-button" type="button">Esci da admin</button></div>
+          <form id="add-player-form" class="inline-form">
+            <label class="grow">Nome<input id="new-player-name" name="name" required maxlength="80" autocomplete="off"></label>
+            <button class="primary-button" type="submit">Aggiungi</button>
+          </form>
+        </div>
+        <div id="admin-player-list" class="stack-list" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Sezioni principali">
+    <button id="nav-votes" class="nav-item active" data-tab="votes" type="button"><span aria-hidden="true">✓</span><small>Voti</small></button>
+    <button id="nav-summary" class="nav-item" data-tab="summary" type="button"><span aria-hidden="true">▦</span><small>Riepilogo</small></button>
+    <button id="nav-games" class="nav-item" data-tab="games" type="button"><span aria-hidden="true">♟</span><small>Giochi</small></button>
+    <button id="nav-ranking" class="nav-item" data-tab="ranking" type="button"><span aria-hidden="true">★</span><small>Classifica</small></button>
+    <button id="nav-history" class="nav-item" data-tab="history" type="button"><span aria-hidden="true">◷</span><small>Storico</small></button>
+    <button id="nav-players" class="nav-item" data-tab="players" type="button"><span aria-hidden="true">♙</span><small>Giocatori</small></button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="loading" class="loading-overlay"><div class="spinner" aria-label="Caricamento"></div></div>
+
+  <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
