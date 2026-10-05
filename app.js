@@ -75,7 +75,6 @@
   }
 
   function bindEvents() {
-	$("#proposal-title").addEventListener("input", handleGameSearch);
     $$("[data-tab]").forEach((button) => button.addEventListener("click", () => openTab(button.dataset.tab)));
     $("#go-to-player").addEventListener("click", () => openTab("players"));
     $("#refresh-button").addEventListener("click", refreshAll);
@@ -118,32 +117,6 @@
     if (error) throw error;
     state.players = data ?? [];
   }
-
-	async function findBggGame(gameName) {
-
-	  const { data } = await state.client
-		.from("bgg_games")
-		.select("game_name")
-		.ilike("game_name", gameName)
-		.maybeSingle();
-
-	  if (!data) return null;
-
-	  return `https://boardgamegeek.com/geeksearch.php?action=search&objecttype=boardgame&q=${encodeURIComponent(data.game_name)}`;
-	}
-
-	async function searchBggGames(term) {
-
-	  if (!term || term.length < 2) return [];
-
-	  const { data } = await state.client
-		.from("bgg_games")
-		.select("game_name")
-		.ilike("game_name", `${term}%`)
-		.limit(10);
-
-	  return data || [];
-}
 
   async function loadCurrentPlayer() {
     const { data, error } = await state.client
@@ -346,102 +319,34 @@
     </table></div>`;
   }
 
-async function handleGameSearch(event) {
-
-  const term = event.target.value.trim();
-
-  const games =
-    await searchBggGames(term);
-
-  const list = $("#bgg-suggestions");
-
-  if (!list) return;
-
-  list.innerHTML =
-    games
-      .map(g =>
-        `<option value="${g.game_name}">`)
-      .join("");
-}
-
   async function submitProposal(event) {
+    event.preventDefault();
+    if (!state.currentPlayer) return toast("Seleziona prima il tuo giocatore.", true);
+    const title = $("#proposal-title").value.trim();
+    const bggUrl = $("#proposal-url").value.trim();
+    const notes = $("#proposal-notes").value.trim();
+    if (!isBggUrl(bggUrl)) return toast("Inserisci un link HTTPS valido di BoardGameGeek, nella sezione /boardgame/.", true);
 
-  event.preventDefault();
-
-  if (!state.currentPlayer)
-    return toast(
-      "Seleziona prima il tuo giocatore.",
-      true
-    );
-
-  const title =
-    $("#proposal-title").value.trim();
-
-  let bggUrl =
-    $("#proposal-url").value.trim();
-
-  const notes =
-    $("#proposal-notes").value.trim();
-
-  if (
-    bggUrl &&
-    !isBggUrl(bggUrl)
-  ) {
-    return toast(
-      "Se inserito, il link deve essere un URL BoardGameGeek valido.",
-      true
-    );
+    const button = event.submitter;
+    setButtonBusy(button, true, "Aggiunta…");
+    try {
+      const { error } = await state.client.from("game_proposals").insert({
+        week_start: state.weekStart,
+        title,
+        bgg_url: bggUrl,
+        notes: notes || null,
+        proposed_by_player_id: state.currentPlayer.id
+      });
+      if (error) throw error;
+      event.target.reset();
+      toast("Gioco proposto.");
+      await loadProposals();
+    } catch (error) {
+      toast(readableError(error), true);
+    } finally {
+      setButtonBusy(button, false);
+    }
   }
-
-  if (!bggUrl) {
-    bggUrl = await findBggGame(title);
-  }
-
-  const button = event.submitter;
-
-  setButtonBusy(
-    button,
-    true,
-    "Aggiunta…"
-  );
-
-  try {
-
-    const { error } =
-      await state.client
-        .from("game_proposals")
-        .insert({
-          week_start: state.weekStart,
-          title,
-          bgg_url: bggUrl,
-          notes: notes || null,
-          proposed_by_player_id:
-            state.currentPlayer.id
-        });
-
-    if (error) throw error;
-
-    event.target.reset();
-
-    toast("Gioco proposto.");
-
-    await loadProposals();
-
-  } catch (error) {
-
-    toast(
-      readableError(error),
-      true
-    );
-
-  } finally {
-
-    setButtonBusy(
-      button,
-      false
-    );
-  }
-}
 
   async function loadProposals() {
     const { data, error } = await state.client
