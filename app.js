@@ -87,7 +87,6 @@
     });
     $("#claim-player-button").addEventListener("click", claimPlayer);
     $("#proposal-form").addEventListener("submit", submitProposal);
-    prepareBggAutocomplete();
     $("#admin-login-form").addEventListener("submit", adminLogin);
     $("#admin-logout").addEventListener("click", adminLogout);
     $("#add-player-form").addEventListener("submit", addPlayer);
@@ -120,14 +119,12 @@
   }
 
   async function loadCurrentPlayer() {
-    // Non usa maybeSingle(): se per errore esistono più associazioni,
-    // prende la più recente invece di bloccare tutta l'app.
     const { data, error } = await state.client
       .from("app_user_players")
       .select("player_id,players(id,name,active)")
-      .limit(1);
+      .maybeSingle();
     if (error) throw error;
-    state.currentPlayer = data?.[0]?.players ?? null;
+    state.currentPlayer = data?.players ?? null;
   }
 
   async function loadAdminState() {
@@ -322,99 +319,17 @@
     </table></div>`;
   }
 
-  function prepareBggAutocomplete() {
-    const input = $("#proposal-title");
-    if (!input) return;
-
-    let list = $("#bgg-suggestions");
-    if (!list) {
-      list = document.createElement("datalist");
-      list.id = "bgg-suggestions";
-      input.insertAdjacentElement("afterend", list);
-    }
-
-    input.setAttribute("list", "bgg-suggestions");
-    input.setAttribute("autocomplete", "off");
-
-    let timer;
-    input.addEventListener("input", () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => loadBggSuggestions(input.value), 250);
-    });
-  }
-
-  async function loadBggSuggestions(term) {
-    const list = $("#bgg-suggestions");
-    if (!list || !state.client) return;
-
-    const query = term.trim();
-    if (query.length < 2) {
-      list.innerHTML = "";
-      return;
-    }
-
-    const { data, error } = await state.client
-      .from("bgg_games")
-      .select("game_name")
-      .ilike("game_name", `%${query}%`)
-      .order("game_name", { ascending: true })
-      .limit(10);
-
-    if (error) {
-      console.warn("Autocomplete BGG non disponibile:", error.message);
-      return;
-    }
-
-    list.innerHTML = (data ?? [])
-      .map((game) => `<option value="${escapeAttribute(game.game_name)}"></option>`)
-      .join("");
-  }
-
-  async function findBggGame(gameName) {
-    const normalized = gameName.trim();
-    if (!normalized) return null;
-
-    const { data, error } = await state.client
-      .from("bgg_games")
-      .select("game_name")
-      .ilike("game_name", normalized)
-      .limit(1);
-
-    if (error) {
-      console.warn("Ricerca BGG non disponibile:", error.message);
-      return null;
-    }
-
-    const matchedName = data?.[0]?.game_name;
-    if (!matchedName) return null;
-    return buildBggSearchUrl(matchedName);
-  }
-
-  function buildBggSearchUrl(gameName) {
-    return `https://boardgamegeek.com/geeksearch.php?action=search&objecttype=boardgame&q=${encodeURIComponent(gameName)}`;
-  }
-
   async function submitProposal(event) {
     event.preventDefault();
-    if (!state.currentPlayer?.active) return toast("Seleziona prima il tuo giocatore.", true);
-
-    const title = $("#proposal-title")?.value.trim() ?? "";
-    const manualUrl = $("#proposal-url")?.value.trim() ?? "";
-    const notes = $("#proposal-notes")?.value.trim() ?? "";
-
-    if (!title) return toast("Inserisci il nome del gioco.", true);
-    if (manualUrl && !isBggUrl(manualUrl)) {
-      return toast("Se inserito, il link deve essere un URL HTTPS di BoardGameGeek.", true);
-    }
+    if (!state.currentPlayer) return toast("Seleziona prima il tuo giocatore.", true);
+    const title = $("#proposal-title").value.trim();
+    const bggUrl = $("#proposal-url").value.trim();
+    const notes = $("#proposal-notes").value.trim();
+    if (!isBggUrl(bggUrl)) return toast("Inserisci un link HTTPS valido di BoardGameGeek, nella sezione /boardgame/.", true);
 
     const button = event.submitter;
     setButtonBusy(button, true, "Aggiunta…");
-
     try {
-      // Priorità: URL inserito manualmente, corrispondenza in bgg_games,
-      // infine ricerca BGG costruita automaticamente dal titolo.
-      const bggUrl = manualUrl || await findBggGame(title) || buildBggSearchUrl(title);
-
       const { error } = await state.client.from("game_proposals").insert({
         week_start: state.weekStart,
         title,
@@ -423,11 +338,8 @@
         proposed_by_player_id: state.currentPlayer.id
       });
       if (error) throw error;
-
       event.target.reset();
-      const suggestions = $("#bgg-suggestions");
-      if (suggestions) suggestions.innerHTML = "";
-      toast("Gioco proposto. Link BoardGameGeek associato automaticamente.");
+      toast("Gioco proposto.");
       await loadProposals();
     } catch (error) {
       toast(readableError(error), true);
@@ -437,25 +349,81 @@
   }
 
   async function loadProposals() {
-    const { data, error } = await state.client
-      .from("game_proposals")
-      .select("id,title,bgg_url,notes,created_at,created_by,players(name)")
-      .eq("week_start", state.weekStart)
-      .order("created_at", { ascending: true });
-    if (error) throw error;
-    const list = $("#proposal-list");
-    if (!data?.length) return empty(list, "Nessuna proposta per questa settimana.");
+    const [proposalsResponse, votesResponse] = await Promise.all([
+      state.client
+        .from("game_proposals")
+        .select("id,title,bgg_url,notes,created_at,created_by,players(name)")
+        .eq("week_start", state.weekStart)
+        .order("created_at", { ascending: true }),
+      state.client
+        .from("game_proposal_votes")
+        .select("proposal_id,player_id")
+        .eq("week_start", state.weekStart)
+    ]);
 
-    list.innerHTML = data.map((proposal) => {
-      const canDelete = state.isAdmin || proposal.created_by === state.session?.user?.id;
-      return `<article class="list-card">
-        <div class="list-card-header"><div><h3>${escapeHtml(proposal.title)}</h3><div class="meta">Proposto da ${escapeHtml(proposal.players?.name ?? "Giocatore")}</div></div>
-        ${canDelete ? `<button class="danger-button" data-delete-proposal="${proposal.id}" type="button">Rimuovi</button>` : ""}</div>
-        ${proposal.bgg_url ? `<p><a href="${escapeAttribute(proposal.bgg_url)}" target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a></p>` : ""}
-        ${proposal.notes ? `<p class="notes">${escapeHtml(proposal.notes)}</p>` : ""}
-      </article>`;
-    }).join("");
-    $$("[data-delete-proposal]").forEach((button) => button.addEventListener("click", () => deleteProposal(button.dataset.deleteProposal)));
+    if (proposalsResponse.error) throw proposalsResponse.error;
+    if (votesResponse.error) throw votesResponse.error;
+
+    const proposals = proposalsResponse.data ?? [];
+    const votes = votesResponse.data ?? [];
+    const list = $("#proposal-list");
+    if (!proposals.length) return empty(list, "Nessuna proposta per questa settimana.");
+
+    const totals = new Map();
+    votes.forEach((vote) => totals.set(vote.proposal_id, (totals.get(vote.proposal_id) ?? 0) + 1));
+    const currentVote = state.currentPlayer
+      ? votes.find((vote) => vote.player_id === state.currentPlayer.id)?.proposal_id ?? null
+      : null;
+
+    const sorted = [...proposals].sort((a, b) => {
+      const voteDifference = (totals.get(b.id) ?? 0) - (totals.get(a.id) ?? 0);
+      return voteDifference || new Date(a.created_at) - new Date(b.created_at);
+    });
+
+    list.innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <strong>Vota il gioco della settimana</strong>
+        <p class="hint" style="margin-bottom:0">Puoi scegliere una proposta. Se cambi idea, il nuovo voto sostituisce il precedente.</p>
+      </div>
+      ${sorted.map((proposal, index) => {
+        const canDelete = state.isAdmin || proposal.created_by === state.session?.user?.id;
+        const selected = currentVote === proposal.id;
+        const voteCount = totals.get(proposal.id) ?? 0;
+        return `<article class="list-card">
+          <div class="list-card-header"><div>
+            <h3>${index === 0 && voteCount > 0 ? "🏆 " : ""}${escapeHtml(proposal.title)}</h3>
+            <div class="meta">Proposto da ${escapeHtml(proposal.players?.name ?? "Giocatore")} · ${voteCount} ${voteCount === 1 ? "voto" : "voti"}</div>
+          </div>
+          ${canDelete ? `<button class="danger-button" data-delete-proposal="${proposal.id}" type="button">Rimuovi</button>` : ""}</div>
+          ${proposal.bgg_url ? `<p><a href="${escapeAttribute(proposal.bgg_url)}" target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a></p>` : ""}
+          ${proposal.notes ? `<p class="notes">${escapeHtml(proposal.notes)}</p>` : ""}
+          <p><button class="${selected ? "primary-button" : "secondary-button"}" data-vote-proposal="${proposal.id}" type="button" ${state.currentPlayer?.active ? "" : "disabled"}>${selected ? "✓ Votato" : "Vota questo gioco"}</button></p>
+        </article>`;
+      }).join("")}`;
+
+    $$('[data-delete-proposal]').forEach((button) => button.addEventListener("click", () => deleteProposal(button.dataset.deleteProposal)));
+    $$('[data-vote-proposal]').forEach((button) => button.addEventListener("click", () => saveGameVote(button.dataset.voteProposal)));
+  }
+
+  async function saveGameVote(proposalId) {
+    if (!state.currentPlayer?.active) return toast("Seleziona prima il tuo giocatore.", true);
+
+    const buttons = $$('[data-vote-proposal]');
+    buttons.forEach((button) => { button.disabled = true; });
+
+    try {
+      const { error } = await state.client.from("game_proposal_votes").upsert({
+        week_start: state.weekStart,
+        proposal_id: proposalId,
+        player_id: state.currentPlayer.id
+      }, { onConflict: "week_start,player_id" });
+      if (error) throw error;
+      toast("Voto del gioco salvato.");
+      await loadProposals();
+    } catch (error) {
+      toast(readableError(error), true);
+      buttons.forEach((button) => { button.disabled = false; });
+    }
   }
 
   async function deleteProposal(id) {
@@ -648,6 +616,7 @@
       .channel("serata-ludica-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "votes" }, scheduleLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "game_proposals" }, scheduleLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "game_proposal_votes" }, scheduleLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "game_results" }, scheduleLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "players" }, scheduleLiveRefresh)
       .subscribe();
@@ -741,7 +710,7 @@
     try {
       const url = new URL(value);
       const host = url.hostname.toLowerCase();
-      return url.protocol === "https:" && (host === "boardgamegeek.com" || host === "www.boardgamegeek.com");
+      return url.protocol === "https:" && (host === "boardgamegeek.com" || host === "www.boardgamegeek.com") && url.pathname.startsWith("/boardgame/");
     } catch {
       return false;
     }
@@ -793,7 +762,7 @@
       [/player_already_claimed/i, "Questo giocatore è già associato a un altro accesso."],
       [/user_already_has_player/i, "Questo accesso ha già un giocatore associato."],
       [/admin_not_configured/i, "Il PIN amministratore non è ancora configurato in Supabase."],
-      [/JSON object requested, multiple \(or no\) rows returned/i, "Il database contiene più associazioni per lo stesso accesso. Un amministratore deve liberare le associazioni duplicate."],
+      [/game_proposal_votes/i, "La tabella per la votazione dei giochi non è ancora configurata in Supabase."],
       [/new row violates row-level security/i, "Operazione non autorizzata dalle regole di sicurezza."],
       [/Failed to fetch/i, "Connessione a Supabase non riuscita. Verifica URL, chiave anon e rete."]
     ];
