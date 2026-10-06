@@ -50,9 +50,83 @@ async function loadBggSuggestions(term){
 async function findBggGame(name){const r=await state.client.from("bgg_games").select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url").ilike("game_name",String(name).trim()).not("bgg_id","is",null).order("rank",{ascending:true,nullsFirst:false}).limit(1);return r.error?null:r.data?.[0]||null}
 function inputValue(selector,value){const el=$(selector);if(el)el.value=value||""}
 async function proposals(){
-  const r=await state.client.from("game_proposals").select("id,title,bgg_id,bgg_url,notes,created_by,players(name),bgg_games(game_name,rank,year_published,average_rating,users_rated,thumbnail_url,image_url)").eq("week_start",iso(state.weekStart));if(r.error)throw r.error;
-  $("#proposal-list").innerHTML=(r.data||[]).map(x=>{const g=x.bgg_games,img=g?.thumbnail_url||g?.image_url;return `<article class="list-card game-proposal-card">${img?`<div class="game-visual"><img class="game-thumb" src="${attr(img)}" alt="Copertina di ${attr(x.title)}"></div>`:""}<div class="game-content"><h3>${esc(x.title)}</h3><div class="meta">Proposto da ${esc(x.players?.name||"")}</div>${g?`<div class="bgg-stats"><span>⭐ ${g.average_rating?Number(g.average_rating).toFixed(1):"-"}</span><span>🏅 #${g.rank||"-"}</span><span>📅 ${g.year_published||"-"}</span></div>`:""}${x.bgg_url?`<p><a href="${attr(x.bgg_url)}" target="_blank" rel="noopener noreferrer">BoardGameGeek ↗</a></p>`:""}${x.notes?`<p>${esc(x.notes)}</p>`:""}</div></article>`}).join("")||'<div class="empty-state">Nessuna proposta.</div>';
+  const [proposalResponse,voteResponse]=await Promise.all([
+    state.client.from("game_proposals")
+      .select("id,title,bgg_id,bgg_url,notes,created_by,created_at,players(name),bgg_games(game_name,rank,year_published,average_rating,users_rated,thumbnail_url,image_url)")
+      .eq("week_start",iso(state.weekStart))
+      .order("created_at",{ascending:true}),
+    state.client.from("game_proposal_votes")
+      .select("proposal_id,player_id")
+      .eq("week_start",iso(state.weekStart))
+  ]);
+  if(proposalResponse.error)throw proposalResponse.error;
+  if(voteResponse.error)throw voteResponse.error;
+
+  const rows=proposalResponse.data||[];
+  const votes=voteResponse.data||[];
+  const target=$("#proposal-list");
+  if(!rows.length){target.innerHTML='<div class="empty-state">Nessuna proposta.</div>';return;}
+
+  const totals=new Map();
+  votes.forEach(v=>totals.set(v.proposal_id,(totals.get(v.proposal_id)||0)+1));
+  const currentVote=state.currentPlayer?votes.find(v=>v.player_id===state.currentPlayer.id)?.proposal_id:null;
+  rows.sort((a,b)=>(totals.get(b.id)||0)-(totals.get(a.id)||0)||new Date(a.created_at)-new Date(b.created_at));
+
+  target.innerHTML=rows.map(x=>{
+    const g=x.bgg_games;
+    const img=g?.thumbnail_url||g?.image_url;
+    const selected=currentVote===x.id;
+    const voteCount=totals.get(x.id)||0;
+    const canDelete=state.isAdmin||x.created_by===state.session?.user?.id;
+    return `<article class="list-card game-proposal-card">
+      ${img?`<div class="game-visual"><img class="game-thumb" src="${attr(img)}" alt="Copertina di ${attr(x.title)}" loading="lazy"></div>`:""}
+      <div class="game-content">
+        <div class="list-card-header">
+          <div><h3>${esc(x.title)}</h3><div class="meta">Proposto da ${esc(x.players?.name||"")}</div></div>
+          ${canDelete?`<button class="danger-button" type="button" data-delete-proposal="${x.id}">Rimuovi</button>`:""}
+        </div>
+        ${g?`<div class="bgg-stats"><span>⭐ ${g.average_rating?Number(g.average_rating).toFixed(1):"-"}</span><span>🏅 #${g.rank||"-"}</span><span>📅 ${g.year_published||"-"}</span></div>`:""}
+        ${x.bgg_url?`<p><a href="${attr(x.bgg_url)}" target="_blank" rel="noopener noreferrer">BoardGameGeek ↗</a></p>`:""}
+        ${x.notes?`<p class="notes">${esc(x.notes)}</p>`:""}
+        <div class="proposal-vote-row">
+          <button class="${selected?"primary-button":"secondary-button"}" type="button" data-vote-proposal="${x.id}" ${state.currentPlayer?.active?"":"disabled"}>${selected?"✓ Votato":"Vota questo gioco"}</button>
+          <strong>${voteCount} ${voteCount===1?"voto":"voti"}</strong>
+        </div>
+      </div>
+    </article>`;
+  }).join("");
+
+  $$('[data-vote-proposal]').forEach(button=>button.addEventListener("click",()=>voteProposal(button.dataset.voteProposal)));
+  $$('[data-delete-proposal]').forEach(button=>button.addEventListener("click",()=>deleteProposal(button.dataset.deleteProposal)));
 }
+
+async function voteProposal(proposalId){
+  if(!state.currentPlayer?.active)return toast("Seleziona prima il tuo giocatore",true);
+  const buttons=$$('[data-vote-proposal]');
+  buttons.forEach(button=>{button.disabled=true});
+  try{
+    const r=await state.client.from("game_proposal_votes").upsert({
+      week_start:iso(state.weekStart),
+      proposal_id:proposalId,
+      player_id:state.currentPlayer.id
+    },{onConflict:"week_start,player_id"});
+    if(r.error)throw r.error;
+    toast("Voto del gioco salvato");
+    await proposals();
+  }catch(error){
+    toast(errText(error),true);
+    buttons.forEach(button=>{button.disabled=false});
+  }
+}
+
+async function deleteProposal(id){
+  if(!confirm("Rimuovere questa proposta?"))return;
+  const r=await state.client.from("game_proposals").delete().eq("id",id);
+  if(r.error)return toast(errText(r.error),true);
+  toast("Proposta rimossa");
+  await proposals();
+}
+
 async function ranking(){const r=await state.client.from("standings").select("player_name,wins,last_places,other_placements,presences,win_rate").order("wins",{ascending:false}).order("win_rate",{ascending:false});if(r.error)throw r.error;$("#ranking-content").innerHTML=`<table class="ranking-table"><thead><tr><th>#</th><th>Giocatore</th><th>Vittorie</th><th>Ultimi</th><th>Altri</th><th>Presenze</th><th>Win rate</th></tr></thead><tbody>${(r.data||[]).map((x,i)=>`<tr><td>${i+1}</td><td><strong>${esc(x.player_name)}</strong></td><td>${x.wins}</td><td>${x.last_places}</td><td>${x.other_placements}</td><td>${x.presences}</td><td><strong>${Number(x.win_rate||0).toLocaleString('it-IT',{minimumFractionDigits:1,maximumFractionDigits:1})}%</strong></td></tr>`).join("")}</tbody></table>`;}
 function fillResult(){const a=state.players.filter(p=>p.active),opts='<option value="">Scegli…</option>'+a.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");$("#result-winner").innerHTML=opts;$("#result-last").innerHTML=opts;$("#result-participants").innerHTML=a.map(p=>`<label class="participant-option"><input type="checkbox" name="participant" value="${p.id}"><span>${esc(p.name)}</span></label>`).join("");if(!$("#result-date").value)$("#result-date").value=iso(new Date());}
 async function record(e){e.preventDefault();const participantIds=$$('[name="participant"]:checked').map(x=>x.value),winner=$("#result-winner").value,last=$("#result-last").value;if(participantIds.length<2)return toast("Seleziona almeno due partecipanti",true);if(!winner||!last)return toast("Seleziona vincitore e ultimo classificato",true);if(winner===last)return toast("Vincitore e ultimo devono essere diversi",true);if(!participantIds.includes(winner)||!participantIds.includes(last))return toast("Vincitore e ultimo devono essere partecipanti",true);const r=await state.client.rpc("admin_create_game_result",{p_played_on:$("#result-date").value,p_game_name:$("#result-game").value.trim(),p_bgg_url:$("#result-url").value.trim()||null,p_notes:$("#result-notes").value.trim()||null,p_winner_player_id:winner,p_last_player_id:last,p_participant_ids:participantIds});if(r.error)return toast(errText(r.error),true);e.target.reset();fillResult();await Promise.all([history(),ranking()]);toast("Risultato registrato");}
