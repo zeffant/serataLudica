@@ -269,14 +269,18 @@ tr:last-child td { border-bottom: 0; }
     min-width: 0;
     overflow: hidden;
   }
-  .week-input-label input {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    margin: 0;
-    padding-right: 4px;
-    padding-left: 8px;
-  }
+.week-input-label input {
+width: 100%;
+min-width: 0;
+ 
+margin: 0;
+ 
+padding: 0 4px;
+ 
+font-size: .75rem;
+ 
+text-align: center;
+}
   .two-columns { grid-template-columns: 1fr; }
   .inline-form { align-items: stretch; flex-direction: column; }
 
