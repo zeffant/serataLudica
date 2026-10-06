@@ -239,44 +239,40 @@ tr:last-child td { border-bottom: 0; }
 }
 
 @media (max-width: 520px) {
-  .app-shell { padding: 10px 10px calc(96px + env(safe-area-inset-bottom)); }
-  .week-picker, .player-banner { align-items: stretch; flex-direction: column; gap: 10px; }
-  .week-picker { padding: 12px; }
-  .week-controls {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    min-width: 0;
-  }
-  .week-controls > button {
-    flex: 0 0 38px;
-    width: 38px;
-    min-width: 38px;
-    padding: 6px 4px;
-  }
-  .week-controls #current-week {
-    flex: 0 0 46px;
-    width: 46px;
-    min-width: 46px;
-    padding-right: 3px;
-    padding-left: 3px;
-    font-size: .76rem;
-    white-space: nowrap;
-  }
-  .week-input-label {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .week-input-label input {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    margin: 0;
-    padding-right: 4px;
-    padding-left: 8px;
-  }
+ 
+.week-controls {
+display: grid;
+grid-template-columns: 34px minmax(0,1fr) 42px;
+align-items: center;
+gap: 4px;
+width: 100%;
+}
+ 
+.week-controls > button {
+width: 34px;
+min-width: 34px;
+padding: 0;
+}
+ 
+.week-controls #current-week {
+width: 42px;
+min-width: 42px;
+font-size: .68rem;
+padding: 0 2px;
+}
+ 
+.week-input-label {
+min-width: 0;
+}
+ 
+.week-input-label input {
+width: 100%;
+min-width: 0;
+margin: 0;
+text-align: center;
+font-size: .90rem;
+padding: 0 4px;
+}
   .two-columns { grid-template-columns: 1fr; }
   .inline-form { align-items: stretch; flex-direction: column; }
 
