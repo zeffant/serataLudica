@@ -24,9 +24,47 @@ async function proposal(e){e.preventDefault();const title=$("#proposal-title").v
 async function proposals(){const r=await state.client.from("game_proposals").select("id,title,bgg_url,notes,created_by,players(name)").eq("week_start",iso(state.weekStart));if(r.error)throw r.error;$("#proposal-list").innerHTML=(r.data||[]).map(x=>`<article class="list-card"><h3>${esc(x.title)}</h3><div class="meta">${esc(x.players?.name||"")}</div>${x.bgg_url?`<p><a href="${attr(x.bgg_url)}" target="_blank">BoardGameGeek ↗</a></p>`:''}</article>`).join("")||'<div class="empty-state">Nessuna proposta.</div>';}
 async function ranking(){const r=await state.client.from("standings").select("player_name,wins,last_places,other_placements,presences,win_rate").order("wins",{ascending:false}).order("win_rate",{ascending:false});if(r.error)throw r.error;$("#ranking-content").innerHTML=`<table class="ranking-table"><thead><tr><th>#</th><th>Giocatore</th><th>Vittorie</th><th>Ultimi</th><th>Altri</th><th>Presenze</th><th>Win rate</th></tr></thead><tbody>${(r.data||[]).map((x,i)=>`<tr><td>${i+1}</td><td><strong>${esc(x.player_name)}</strong></td><td>${x.wins}</td><td>${x.last_places}</td><td>${x.other_placements}</td><td>${x.presences}</td><td><strong>${Number(x.win_rate||0).toLocaleString('it-IT',{minimumFractionDigits:1,maximumFractionDigits:1})}%</strong></td></tr>`).join("")}</tbody></table>`;}
 function fillResult(){const a=state.players.filter(p=>p.active),opts='<option value="">Scegli…</option>'+a.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");$("#result-winner").innerHTML=opts;$("#result-last").innerHTML=opts;$("#result-participants").innerHTML=a.map(p=>`<label class="participant-option"><input type="checkbox" name="participant" value="${p.id}"><span>${esc(p.name)}</span></label>`).join("");if(!$("#result-date").value)$("#result-date").value=iso(new Date());}
-async function record(e){e.preventDefault();const participantIds=$$('[name="participant"]:checked').map(x=>x.value),winner=$("#result-winner").value,last=$("#result-last").value;if(participantIds.length<2)return toast("Seleziona almeno due partecipanti",true);if(!participantIds.includes(winner)||!participantIds.includes(last))return toast("Vincitore e ultimo devono essere partecipanti",true);const r=await state.client.rpc("admin_create_game_result",{p_played_on:$("#result-date").value,p_game_name:$("#result-game").value.trim(),p_bgg_url:$("#result-url").value.trim()||null,p_notes:$("#result-notes").value.trim()||null,p_winner_player_id:winner,p_last_player_id:last,p_participant_ids:participantIds});if(r.error)return toast(errText(r.error),true);e.target.reset();fillResult();await Promise.all([history(),ranking()]);toast("Risultato registrato");}
-async function history(){const r=await state.client.from("game_history").select("id,played_on,game_name,bgg_url,notes,participants,created_at").order("played_on",{ascending:false});if(r.error)throw r.error;$("#history-list").innerHTML=(r.data||[]).map(x=>{const ps=Array.isArray(x.participants)?x.participants:[];return `<article class="list-card"><div class="list-card-header"><div><h3>${esc(x.game_name)}</h3><div class="meta">${histFmt.format(fromIso(x.played_on))} · ${ps.length} presenze</div></div>${state.isAdmin?`<button class="danger-button" data-del="${x.id}">Elimina</button>`:''}</div><div class="history-participants">${ps.map(p=>`<span class="participant-badge ${p.placement_role}">${p.placement_role==='winner'?'🏆':p.placement_role==='last'?'🔻':'•'} ${esc(p.player_name)}</span>`).join("")}</div>${x.notes?`<p>${esc(x.notes)}</p>`:''}</article>`}).join("");$$('[data-del]').forEach(b=>b.onclick=()=>delResult(b.dataset.del));}
-async function delResult(id){if(!confirm("Eliminare il risultato?"))return;const r=await state.client.from("game_results").delete().eq("id",id);if(r.error)return toast(errText(r.error),true);await history();}
+async function record(e){e.preventDefault();const participantIds=$$('[name="participant"]:checked').map(x=>x.value),winner=$("#result-winner").value,last=$("#result-last").value;if(participantIds.length<2)return toast("Seleziona almeno due partecipanti",true);if(!winner||!last)return toast("Seleziona vincitore e ultimo classificato",true);if(winner===last)return toast("Vincitore e ultimo devono essere diversi",true);if(!participantIds.includes(winner)||!participantIds.includes(last))return toast("Vincitore e ultimo devono essere partecipanti",true);const r=await state.client.rpc("admin_create_game_result",{p_played_on:$("#result-date").value,p_game_name:$("#result-game").value.trim(),p_bgg_url:$("#result-url").value.trim()||null,p_notes:$("#result-notes").value.trim()||null,p_winner_player_id:winner,p_last_player_id:last,p_participant_ids:participantIds});if(r.error)return toast(errText(r.error),true);e.target.reset();fillResult();await Promise.all([history(),ranking()]);toast("Risultato registrato");}
+async function history(){
+  const r=await state.client.from("game_history")
+    .select("id,played_on,game_name,bgg_url,notes,winner_name,last_name,participants,created_at")
+    .order("played_on",{ascending:false})
+    .order("created_at",{ascending:false});
+  if(r.error)throw r.error;
+  const rows=r.data||[];
+  if(!rows.length){$("#history-list").innerHTML='<div class="empty-state">Lo storico è vuoto.</div>';return;}
+  $("#history-list").innerHTML=rows.map(x=>{
+    const ps=normalizzaPartecipanti(x.participants,x.winner_name,x.last_name);
+    return `<article class="list-card">
+      <div class="list-card-header"><div><h3>${esc(x.game_name)}</h3><div class="meta">${histFmt.format(fromIso(x.played_on))} · ${ps.length} ${ps.length===1?'presenza':'presenze'}</div></div>${state.isAdmin?`<button class="danger-button" data-del="${x.id}">Elimina</button>`:''}</div>
+      ${x.bgg_url?`<p><a href="${attr(x.bgg_url)}" target="_blank" rel="noopener noreferrer">BoardGameGeek ↗</a></p>`:''}
+      <div class="history-participants">${ps.map(p=>badgePartecipante(p)).join("")}</div>
+      ${x.notes?`<p class="notes">${esc(x.notes)}</p>`:''}
+    </article>`;
+  }).join("");
+  $$('[data-del]').forEach(b=>b.onclick=()=>delResult(b.dataset.del));
+}
+function normalizzaPartecipanti(value,winnerName,lastName){
+  let list=value;
+  if(typeof list==="string"){try{list=JSON.parse(list)}catch{list=[]}}
+  if(!Array.isArray(list))list=[];
+  const normalized=list.map(p=>({
+    player_name:p?.player_name??p?.name??p?.players?.name??"Giocatore",
+    placement_role:p?.placement_role??p?.role??"other"
+  })).filter(p=>p.player_name);
+  if(!normalized.length){
+    if(winnerName)normalized.push({player_name:winnerName,placement_role:"winner"});
+    if(lastName&&lastName!==winnerName)normalized.push({player_name:lastName,placement_role:"last"});
+  }
+  const order={winner:0,other:1,last:2};
+  return normalized.sort((a,b)=>(order[a.placement_role]??1)-(order[b.placement_role]??1)||a.player_name.localeCompare(b.player_name,"it"));
+}
+function badgePartecipante(p){
+  const role=["winner","other","last"].includes(p.placement_role)?p.placement_role:"other";
+  const icon=role==="winner"?"🏆":role==="last"?"🔻":"•";
+  return `<span class="participant-badge ${role}">${icon} ${esc(p.player_name)}</span>`;
+}
+async function delResult(id){if(!confirm("Eliminare il risultato?"))return;const r=await state.client.from("game_results").delete().eq("id",id);if(r.error)return toast(errText(r.error),true);await Promise.all([history(),ranking()]);}
 async function adminLogin(e){e.preventDefault();const r=await state.client.rpc("admin_login",{p_pin:$("#admin-pin").value});if(r.error||!r.data)return toast("PIN non valido",true);state.isAdmin=true;renderAdmin();}
 async function adminLogout(){await state.client.rpc("admin_logout");state.isAdmin=false;renderAdmin();}
 async function addPlayer(e){e.preventDefault();const r=await state.client.from("players").insert({name:$("#new-player-name").value.trim()});if(r.error)return toast(errText(r.error),true);e.target.reset();await players();renderPlayer();await adminPlayers();}
