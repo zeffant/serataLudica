@@ -342,88 +342,63 @@ tr:last-child td { border-bottom: 0; }
 }
 .participants-fieldset{margin:0;padding:12px;border:1px solid var(--border);border-radius:14px}.participants-fieldset legend{padding:0 6px;font-weight:800}.participants-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:7px}.participant-option{display:flex;min-height:42px;padding:8px 10px;align-items:center;gap:8px;background:#f8fafc;border:1px solid var(--border);border-radius:10px}.participant-option input{width:19px;min-width:19px;min-height:19px;margin:0;accent-color:var(--primary)}.history-participants{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.participant-badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:#f2f4f7;font-size:.76rem;font-weight:750}.participant-badge.winner{background:#fef3c7}.participant-badge.last{color:var(--no);background:var(--no-bg)}.ranking-table{min-width:760px}@media(max-width:520px){.participants-grid{grid-template-columns:1fr 1fr}.participant-option{font-size:.78rem}}
 
-/* =====================================================
-   FIX CARD GIOCHI PROPOSTI
-   ===================================================== */
 
-#proposal-list,
-#proposal-list.stack-list {
-    width: 100%;
-    min-width: 0;
+/* Fix definitivo proposte: layout esplicito con/senza immagine */
+#proposal-list .game-proposal-card.has-image {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
 }
 
-#proposal-list .game-proposal-card {
-    width: 100%;
-    min-width: 0;
+#proposal-list .game-proposal-card.no-image {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
 
-    display: grid;
+#proposal-list .game-proposal-card.no-image .game-content,
+#proposal-list .game-proposal-card.has-image .game-content {
+  width: 100%;
+  min-width: 0;
+}
+
+#proposal-list .list-card-header > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#proposal-list .danger-button {
+  flex: 0 0 auto;
+}
+
+#proposal-list .proposal-vote-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+#proposal-list [data-vote-proposal] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  #proposal-list .game-proposal-card.has-image {
     grid-template-columns: 76px minmax(0, 1fr);
-    gap: 12px;
+    gap: 11px;
+  }
 
-    align-items: start;
-}
+  #proposal-list .proposal-vote-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
 
-#proposal-list .game-content {
-    min-width: 0;
-    width: 100%;
-}
-
-#proposal-list .game-content h3 {
-    margin: 0 0 6px;
-
-    font-size: 1rem;
-    line-height: 1.25;
-
-    overflow-wrap: normal;
-    word-break: normal;
-    white-space: normal;
-    hyphens: none;
-}
-
-#proposal-list .game-content p {
-    overflow-wrap: break-word;
-}
-
-#proposal-list .game-content a {
-    word-break: normal;
-    overflow-wrap: normal;
-}
-
-#proposal-list .game-thumb {
-    width: 76px;
-    height: 106px;
-
-    object-fit: cover;
-    border-radius: 12px;
-}
-
-#proposal-list .game-visual {
-    width: 76px;
-}
-
-#proposal-list .bgg-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-}
-
-#proposal-list .bgg-stats span {
-    padding: 3px 7px;
-    font-size: .72rem;
-}
-
-@media (min-width: 760px) {
-
-    #proposal-list .game-proposal-card {
-        grid-template-columns: 96px minmax(0, 1fr);
-    }
-
-    #proposal-list .game-thumb {
-        width: 96px;
-        height: 132px;
-    }
-
-    #proposal-list .game-visual {
-        width: 96px;
-    }
+  #proposal-list .proposal-vote-row strong {
+    text-align: right;
+  }
 }

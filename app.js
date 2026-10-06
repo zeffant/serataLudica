@@ -78,7 +78,7 @@ async function proposals(){
     const selected=currentVote===x.id;
     const voteCount=totals.get(x.id)||0;
     const canDelete=state.isAdmin||x.created_by===state.session?.user?.id;
-    return `<article class="list-card game-proposal-card">
+    return `<article class="list-card game-proposal-card ${img?"has-image":"no-image"}">
       ${img?`<div class="game-visual"><img class="game-thumb" src="${attr(img)}" alt="Copertina di ${attr(x.title)}" loading="lazy"></div>`:""}
       <div class="game-content">
         <div class="list-card-header">
