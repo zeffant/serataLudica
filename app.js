@@ -153,7 +153,6 @@
       .from("app_user_players")
       .select("player_id,user_id,players(id,name,active)")
       .eq("user_id", userId)
-      .order("created_at", { ascending: false })
       .limit(1);
 
     if (error) throw error;
