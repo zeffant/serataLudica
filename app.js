@@ -396,7 +396,7 @@
     if (!bggId || state.imageRequests.has(bggId)) return;
     state.imageRequests.add(bggId);
     try {
-      const { error } = await state.client.functions.invoke("bgg-image", { body: { bgg_id: Number(bggId) } });
+      const { error } = await state.client.functions.invoke("update-bgg-images", { body: { bgg_id: Number(bggId) } });
       if (error) throw error;
       if (state.activeTab === "games") setTimeout(loadProposals, 400);
       if (state.activeTab === "history") setTimeout(loadHistory, 400);
