@@ -256,9 +256,9 @@ tr:last-child td { border-bottom: 0; }
     padding: 6px 4px;
   }
   .week-controls #current-week {
-    flex: 0 0 42px;
-    width: 42px;
-    min-width: 42px;
+    flex: 0 0 46px;
+    width: 46px;
+    min-width: 46px;
     padding-right: 3px;
     padding-left: 3px;
     font-size: .76rem;
@@ -340,3 +340,4 @@ tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+.participants-fieldset{margin:0;padding:12px;border:1px solid var(--border);border-radius:14px}.participants-fieldset legend{padding:0 6px;font-weight:800}.participants-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:7px}.participant-option{display:flex;min-height:42px;padding:8px 10px;align-items:center;gap:8px;background:#f8fafc;border:1px solid var(--border);border-radius:10px}.participant-option input{width:19px;min-width:19px;min-height:19px;margin:0;accent-color:var(--primary)}.history-participants{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.participant-badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:#f2f4f7;font-size:.76rem;font-weight:750}.participant-badge.winner{background:#fef3c7}.participant-badge.last{color:var(--no);background:var(--no-bg)}.ranking-table{min-width:760px}@media(max-width:520px){.participants-grid{grid-template-columns:1fr 1fr}.participant-option{font-size:.78rem}}
