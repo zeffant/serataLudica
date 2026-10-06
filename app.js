@@ -146,13 +146,26 @@
   }
 
   async function loadCurrentPlayer() {
-    await ensureValidSession();
+    const session = await ensureValidSession();
+    const userId = session.user.id;
+
     const { data, error } = await state.client
       .from("app_user_players")
-      .select("player_id,players(id,name,active)")
+      .select("player_id,user_id,players(id,name,active)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
       .limit(1);
+
     if (error) throw error;
-    state.currentPlayer = data?.[0]?.players ?? null;
+
+    const association = data?.[0] ?? null;
+    state.currentPlayer = association?.players ?? null;
+
+    if (association && association.user_id !== userId) {
+      state.currentPlayer = null;
+      throw new Error("Associazione giocatore non coerente con la sessione corrente.");
+    }
+
     return state.currentPlayer;
   }
 
@@ -387,7 +400,7 @@
   async function loadBggSuggestions(term) {
     const box = $("#bgg-suggestions-mobile");
     const query = String(term ?? "").trim();
-    if (!box || !state.client || query.length < 3) {
+    if (!box || !state.client || query.length < 2) {
       if (box) { box.innerHTML = ""; box.classList.add("hidden"); }
       return;
     }
@@ -399,15 +412,7 @@
       .limit(12);
     if (error) { console.warn("Autocomplete BGG non disponibile", error); return; }
     const games = data ?? [];
-    box.innerHTML = games.map((g, i) => {
-      const rank = g.rank ? `#${g.rank}` : "Classifica n/d";
-      const year = g.year_published ?? "Anno n/d";
-      const rating = g.average_rating ? `⭐ ${Number(g.average_rating).toFixed(1)}` : "⭐ n/d";
-      return `<button type="button" class="bgg-suggestion" role="option" data-bgg-index="${i}">
-        <strong>${escapeHtml(g.game_name)}</strong>
-        <span class="bgg-meta">${escapeHtml(rank)} · ${escapeHtml(year)} · ${escapeHtml(rating)}</span>
-      </button>`;
-    }).join("");
+    box.innerHTML = games.map((g, i) => `<button type="button" class="bgg-suggestion" role="option" data-bgg-index="${i}"><strong>${escapeHtml(g.game_name)}</strong><span>${g.year_published ?? ""}${g.rank ? ` · #${g.rank}` : ""}</span></button>`).join("");
     box.classList.toggle("hidden", !games.length);
     box.querySelectorAll("[data-bgg-index]").forEach((button) => button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -639,6 +644,7 @@
     setButtonBusy(button, true, "Verifica…");
     try {
       await ensureValidSession();
+      await ensureValidSession();
       const { data, error } = await state.client.rpc("admin_login", { p_pin: pin });
       if (error) throw error;
       if (!data) return toast("PIN non valido o accesso temporaneamente bloccato.", true);
@@ -668,6 +674,7 @@
     const button = event.submitter;
     setButtonBusy(button, true, "Aggiunta…");
     try {
+      await ensureValidSession();
       await ensureValidSession();
       const { error } = await state.client.from("players").insert({ name });
       if (error) throw error;
@@ -883,6 +890,7 @@
       [/duplicate key.*players_name/i, "Esiste già un giocatore con questo nome."],
       [/player_already_claimed/i, "Questo giocatore è già associato a un altro accesso."],
       [/user_already_has_player/i, "Questo accesso ha già un giocatore associato."],
+      [/Associazione giocatore non coerente/i, "L’associazione del giocatore non coincide con la sessione corrente. Ricarica la pagina."],
       [/admin_not_configured/i, "Il PIN amministratore non è ancora configurato in Supabase."],
       [/JSON object requested, multiple \(or no\) rows returned/i, "Il database contiene più associazioni per lo stesso accesso. Un amministratore deve liberare le associazioni duplicate."],
       [/JWT expired|invalid claim|invalid JWT/i, "La sessione è scaduta o non è più valida. Ricarica la pagina e riprova."],
