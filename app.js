@@ -387,7 +387,7 @@
   async function loadBggSuggestions(term) {
     const box = $("#bgg-suggestions-mobile");
     const query = String(term ?? "").trim();
-    if (!box || !state.client || query.length < 2) {
+    if (!box || !state.client || query.length < 3) {
       if (box) { box.innerHTML = ""; box.classList.add("hidden"); }
       return;
     }
@@ -399,7 +399,15 @@
       .limit(12);
     if (error) { console.warn("Autocomplete BGG non disponibile", error); return; }
     const games = data ?? [];
-    box.innerHTML = games.map((g, i) => `<button type="button" class="bgg-suggestion" role="option" data-bgg-index="${i}"><strong>${escapeHtml(g.game_name)}</strong><span>${g.year_published ?? ""}${g.rank ? ` · #${g.rank}` : ""}</span></button>`).join("");
+    box.innerHTML = games.map((g, i) => {
+      const rank = g.rank ? `#${g.rank}` : "Classifica n/d";
+      const year = g.year_published ?? "Anno n/d";
+      const rating = g.average_rating ? `⭐ ${Number(g.average_rating).toFixed(1)}` : "⭐ n/d";
+      return `<button type="button" class="bgg-suggestion" role="option" data-bgg-index="${i}">
+        <strong>${escapeHtml(g.game_name)}</strong>
+        <span class="bgg-meta">${escapeHtml(rank)} · ${escapeHtml(year)} · ${escapeHtml(rating)}</span>
+      </button>`;
+    }).join("");
     box.classList.toggle("hidden", !games.length);
     box.querySelectorAll("[data-bgg-index]").forEach((button) => button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -631,7 +639,6 @@
     setButtonBusy(button, true, "Verifica…");
     try {
       await ensureValidSession();
-      await ensureValidSession();
       const { data, error } = await state.client.rpc("admin_login", { p_pin: pin });
       if (error) throw error;
       if (!data) return toast("PIN non valido o accesso temporaneamente bloccato.", true);
@@ -661,7 +668,6 @@
     const button = event.submitter;
     setButtonBusy(button, true, "Aggiunta…");
     try {
-      await ensureValidSession();
       await ensureValidSession();
       const { error } = await state.client.from("players").insert({ name });
       if (error) throw error;
