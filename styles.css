@@ -37,7 +37,19 @@ a { color: var(--primary-dark); text-underline-offset: 3px; }
 .week-picker, .player-banner { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .field-label { display: block; color: var(--muted); font-size: .76rem; font-weight: 700; }
 .week-picker strong, .player-banner strong { display: block; margin-top: 2px; }
-.week-controls { display: flex; gap: 6px; align-items: center; }
+week-controls {
+display: flex;
+gap: 8px;
+align-items: center;
+}
+ 
+.week-controls > * {
+flex-shrink: 0;
+}
+ 
+#week-label {
+text-align: center;
+}
 .week-input-label input { width: 128px; }
 
 .section-heading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 20px 2px 10px; }
@@ -84,7 +96,27 @@ label { color: #344054; font-size: .86rem; font-weight: 700; }
 table { width: 100%; border-collapse: collapse; background: white; }
 th, td { padding: 11px 10px; border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
 th { color: #475467; background: #f8fafc; font-size: .75rem; letter-spacing: .02em; }
-th:first-child, td:first-child { position: sticky; left: 0; z-index: 1; text-align: left; background: inherit; }
+th:first-child,
+td:first-child {
+position: static;
+left: auto;
+text-align: left;
+}
+ 
+/* Desktop e tablet */
+ 
+@media (min-width: 760px) {
+ 
+th:first-child,
+td:first-child {
+position: sticky;
+left: 0;
+z-index: 1;
+text-align: left;
+background: inherit;
+}
+ 
+}
 tr:last-child td { border-bottom: 0; }
 .vote-badge { display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: 99px; font-size: .75rem; font-weight: 850; }
 .vote-badge.yes { color: var(--yes); background: var(--yes-bg); }
