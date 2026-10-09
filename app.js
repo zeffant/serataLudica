@@ -5,7 +5,7 @@ const state={client:null,session:null,players:[],currentPlayer:null,isAdmin:fals
 const choices={yes:["Sì","S"],maybe:["Forse","F"],no:["No","N"]};
 const longFmt=new Intl.DateTimeFormat("it-IT",{weekday:"long",day:"numeric",month:"long"}), shortFmt=new Intl.DateTimeFormat("it-IT",{day:"2-digit",month:"2-digit"}), histFmt=new Intl.DateTimeFormat("it-IT",{day:"numeric",month:"long",year:"numeric"});
 document.addEventListener("DOMContentLoaded",init);
-async function init(){bind();weekUi();try{const c=window.SERATA_LUDICA_CONFIG;if(!c?.SUPABASE_URL||!c?.SUPABASE_ANON_KEY)throw Error("Configurazione incompleta");state.client=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});await session();await base();subscribe();await loadTab();}catch(e){toast(errText(e),true);}finally{$("#loading").classList.add("hidden");$("#app").setAttribute("aria-busy","false");}}
+async function init(){bind();weekUi();try{const c=window.SERATA_LUDICA_CONFIG;if(!c?.SUPABASE_URL||!c?.SUPABASE_ANON_KEY)throw Error("Configurazione incompleta");state.client=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});window.serataLudicaSupabase=state.client;await session();await base();subscribe();await loadTab();}catch(e){toast(errText(e),true);}finally{$("#loading").classList.add("hidden");$("#app").setAttribute("aria-busy","false");}}
 function bind(){$$("[data-tab]").forEach(b=>b.onclick=()=>openTab(b.dataset.tab));$("#go-to-player").onclick=()=>openTab("players");$("#refresh-button").onclick=async()=>{await base();await loadTab();};$("#previous-week").onclick=()=>shift(-7);$("#next-week").onclick=()=>shift(7);$("#current-week").onclick=()=>setWeek(new Date());$("#week-input").onchange=e=>{const d=weekMonday(e.target.value);if(d)setWeek(d)};$("#claim-player-button").onclick=claim;$("#proposal-form").onsubmit=proposal;prepareBggAutocomplete();$("#result-form").onsubmit=record;$("#admin-login-form").onsubmit=adminLogin;$("#admin-logout").onclick=adminLogout;$("#add-player-form").onsubmit=addPlayer;}
 async function session(){let r=await state.client.auth.getSession();if(r.error)throw r.error;state.session=r.data.session;if(!state.session){r=await state.client.auth.signInAnonymously();if(r.error)throw r.error;state.session=r.data.session;}return state.session;}
 async function base(){await Promise.all([players(),currentPlayer(),adminState()]);renderPlayer();renderAdmin();}
@@ -23,15 +23,40 @@ async function summary(){const [vr,pr]=await Promise.all([state.client.from("vot
 async function proposal(e){
   e.preventDefault();
   if(!state.currentPlayer?.active)return toast("Seleziona prima il tuo giocatore",true);
-  const title=$("#proposal-title").value.trim(),manualUrl=$("#proposal-url").value.trim(),notes=$("#proposal-notes").value.trim();
+
+  const title=$("#proposal-title").value.trim();
+  const manualUrl=$("#proposal-url").value.trim();
+  const notes=$("#proposal-notes").value.trim();
   if(!title)return toast("Inserisci il nome del gioco",true);
-  const selected=state.selectedBggGame?.game_name?.toLowerCase()===title.toLowerCase()?state.selectedBggGame:null;
-  const game=selected||await findBggGame(title);
-  const bggUrl=manualUrl||game?.bgg_url||(game?.bgg_id?`https://boardgamegeek.com/boardgame/${game.bgg_id}`:`https://boardgamegeek.com/geeksearch.php?q=${encodeURIComponent(title)}`);
-  const r=await state.client.from("game_proposals").insert({week_start:iso(state.weekStart),title,bgg_id:game?.bgg_id??null,bgg_url:bggUrl,notes:notes||null,proposed_by_player_id:state.currentPlayer.id});
+
+  let game=state.selectedBggGame?.game_name?.toLowerCase()===title.toLowerCase()
+    ? state.selectedBggGame
+    : await findBggGame(title);
+
+  if(game)game=await ensureBggImage(game);
+
+  const bggUrl=manualUrl||game?.bgg_url||(
+    game?.bgg_id
+      ? `https://boardgamegeek.com/boardgame/${game.bgg_id}`
+      : `https://boardgamegeek.com/geeksearch.php?q=${encodeURIComponent(title)}`
+  );
+
+  const r=await state.client.from("game_proposals").insert({
+    week_start:iso(state.weekStart),
+    title,
+    bgg_id:game?.bgg_id??null,
+    bgg_url:bggUrl,
+    notes:notes||null,
+    proposed_by_player_id:state.currentPlayer.id
+  });
   if(r.error)return toast(errText(r.error),true);
-  e.target.reset();state.selectedBggGame=null;const box=$("#bgg-suggestions-mobile");if(box){box.innerHTML="";box.classList.add("hidden")}
-  await proposals();toast(game?"Gioco proposto con dati BoardGameGeek associati":"Gioco proposto");
+
+  e.target.reset();
+  state.selectedBggGame=null;
+  const box=$("#bgg-suggestions-mobile");
+  if(box){box.innerHTML="";box.classList.add("hidden")}
+  await proposals();
+  toast(game?"Gioco proposto con dati BoardGameGeek associati":"Gioco proposto");
 }
 function prepareBggAutocomplete(){
   const input=$("#proposal-title"),url=$("#proposal-url");if(!input)return;
@@ -41,65 +66,69 @@ function prepareBggAutocomplete(){
   input.addEventListener("blur",()=>setTimeout(()=>box.classList.add("hidden"),180));input.addEventListener("focus",()=>{if(box.children.length)box.classList.remove("hidden")});
 }
 async function loadBggSuggestions(term){
-  const box=$("#bgg-suggestions-mobile"),q=String(term||"").trim();if(!box||q.length<2){if(box){box.innerHTML="";box.classList.add("hidden")}return}
-  const r=await state.client.from("bgg_games").select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url").ilike("game_name",`%${q}%`).not("bgg_id","is",null).order("rank",{ascending:true,nullsFirst:false}).limit(12);
-  if(r.error){console.warn("Autocomplete BGG",r.error);return}const games = r.data || [];
-
-games.forEach(g => {
-  ensureBggImage(g);
-});
-  box.innerHTML=games.map((g,i)=>`<button type="button" class="bgg-suggestion" data-bgg-index="${i}"><strong>${esc(g.game_name)}</strong><span>${g.rank?`#${g.rank} · `:""}${g.year_published||""}${g.average_rating?` · ⭐ ${Number(g.average_rating).toFixed(1)}`:""}</span></button>`).join("");box.classList.toggle("hidden",!games.length);
-  box.querySelectorAll("[data-bgg-index]").forEach(b=>b.addEventListener("pointerdown",ev=>{ev.preventDefault();const g=games[Number(b.dataset.bggIndex)];state.selectedBggGame=g;inputValue("#proposal-title",g.game_name);inputValue("#proposal-url",g.bgg_url||`https://boardgamegeek.com/boardgame/${g.bgg_id}`);box.classList.add("hidden")}));
-}
-async function ensureBggImage(game){
-
-  if(
-    !game?.bgg_id ||
-    game.thumbnail_url ||
-    game.image_url ||
-    state.imageRequests.has(game.bgg_id)
-  ){
-    return game;
+  const box=$("#bgg-suggestions-mobile");
+  const q=String(term||"").trim();
+  if(!box||q.length<2){
+    if(box){box.innerHTML="";box.classList.add("hidden")}
+    return;
   }
 
+  const r=await state.client.from("bgg_games")
+    .select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url")
+    .ilike("game_name",`%${q}%`)
+    .not("bgg_id","is",null)
+    .order("rank",{ascending:true,nullsFirst:false})
+    .limit(12);
+
+  if(r.error){console.warn("Autocomplete BGG",r.error);return}
+  const games=r.data||[];
+
+  box.innerHTML=games.map((g,i)=>`<button type="button" class="bgg-suggestion" data-bgg-index="${i}"><strong>${esc(g.game_name)}</strong><span>${g.rank?`#${g.rank} · `:""}${g.year_published||""}${g.average_rating?` · ⭐ ${Number(g.average_rating).toFixed(1)}`:""}</span></button>`).join("");
+  box.classList.toggle("hidden",!games.length);
+
+  box.querySelectorAll("[data-bgg-index]").forEach(button=>button.addEventListener("pointerdown",async event=>{
+    event.preventDefault();
+    const index=Number(button.dataset.bggIndex);
+    let game=games[index];
+    inputValue("#proposal-title",game.game_name);
+    inputValue("#proposal-url",game.bgg_url||`https://boardgamegeek.com/boardgame/${game.bgg_id}`);
+    box.classList.add("hidden");
+
+    game=await ensureBggImage(game);
+    games[index]=game;
+    state.selectedBggGame=game;
+  }));
+}
+async function ensureBggImage(game){
+  if(!game?.bgg_id||game.thumbnail_url||game.image_url)return game;
+  if(state.imageRequests.has(game.bgg_id))return game;
+
   state.imageRequests.add(game.bgg_id);
+  let completed=false;
 
-  try {
+  try{
+    const {data,error}=await state.client.functions.invoke("fetch-bgg-image",{
+      body:{bgg_id:game.bgg_id}
+    });
 
-    await state.client.functions.invoke(
-      "fetch-bgg-image",
-      {
-        body: {
-          bgg_id: game.bgg_id
-        }
-      }
-    );
+    if(error)throw error;
+    if(data?.error)throw new Error(data.error);
 
-    const refreshed = await state.client
-      .from("bgg_games")
-      .select(`
-        bgg_id,
-        game_name,
-        rank,
-        year_published,
-        average_rating,
-        users_rated,
-        bgg_url,
-        thumbnail_url,
-        image_url
-      `)
-      .eq("bgg_id", game.bgg_id)
-      .single();
+    const refreshed=await state.client.from("bgg_games")
+      .select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url")
+      .eq("bgg_id",game.bgg_id)
+      .maybeSingle();
 
-    if (!refreshed.error && refreshed.data) {
-      return refreshed.data;
+    if(refreshed.error)throw refreshed.error;
+    if(refreshed.data){
+      Object.assign(game,refreshed.data);
+      completed=Boolean(game.thumbnail_url||game.image_url);
+      return game;
     }
-
-  } catch (error) {
-    console.warn(
-      "Errore recupero immagine BGG",
-      error
-    );
+  }catch(error){
+    console.warn(`Errore recupero immagine BGG ${game.bgg_id}:`,error);
+  }finally{
+    if(!completed)state.imageRequests.delete(game.bgg_id);
   }
 
   return game;
@@ -153,6 +182,18 @@ async function proposals(){
   if(voteResponse.error)throw voteResponse.error;
 
   const rows=proposalResponse.data||[];
+
+  let imagesUpdated=false;
+  for(const row of rows){
+    const game=row.bgg_games;
+    if(row.bgg_id&&game&&!game.thumbnail_url&&!game.image_url){
+      const refreshed=await ensureBggImage({...game,bgg_id:row.bgg_id});
+      if(refreshed.thumbnail_url||refreshed.image_url){
+        row.bgg_games={...game,...refreshed};
+        imagesUpdated=true;
+      }
+    }
+  }
   const votes=voteResponse.data||[];
   const target=$("#proposal-list");
   if(!rows.length){target.innerHTML='<div class="empty-state">Nessuna proposta.</div>';return;}
