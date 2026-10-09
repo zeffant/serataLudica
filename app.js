@@ -43,11 +43,101 @@ function prepareBggAutocomplete(){
 async function loadBggSuggestions(term){
   const box=$("#bgg-suggestions-mobile"),q=String(term||"").trim();if(!box||q.length<2){if(box){box.innerHTML="";box.classList.add("hidden")}return}
   const r=await state.client.from("bgg_games").select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url").ilike("game_name",`%${q}%`).not("bgg_id","is",null).order("rank",{ascending:true,nullsFirst:false}).limit(12);
-  if(r.error){console.warn("Autocomplete BGG",r.error);return}const games=r.data||[];
+  if(r.error){console.warn("Autocomplete BGG",r.error);return}const games = r.data || [];
+
+games.forEach(g => {
+  ensureBggImage(g);
+});
   box.innerHTML=games.map((g,i)=>`<button type="button" class="bgg-suggestion" data-bgg-index="${i}"><strong>${esc(g.game_name)}</strong><span>${g.rank?`#${g.rank} · `:""}${g.year_published||""}${g.average_rating?` · ⭐ ${Number(g.average_rating).toFixed(1)}`:""}</span></button>`).join("");box.classList.toggle("hidden",!games.length);
   box.querySelectorAll("[data-bgg-index]").forEach(b=>b.addEventListener("pointerdown",ev=>{ev.preventDefault();const g=games[Number(b.dataset.bggIndex)];state.selectedBggGame=g;inputValue("#proposal-title",g.game_name);inputValue("#proposal-url",g.bgg_url||`https://boardgamegeek.com/boardgame/${g.bgg_id}`);box.classList.add("hidden")}));
 }
-async function findBggGame(name){const r=await state.client.from("bgg_games").select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url").ilike("game_name",String(name).trim()).not("bgg_id","is",null).order("rank",{ascending:true,nullsFirst:false}).limit(1);return r.error?null:r.data?.[0]||null}
+async function ensureBggImage(game){
+
+  if(
+    !game?.bgg_id ||
+    game.thumbnail_url ||
+    game.image_url ||
+    state.imageRequests.has(game.bgg_id)
+  ){
+    return game;
+  }
+
+  state.imageRequests.add(game.bgg_id);
+
+  try {
+
+    await state.client.functions.invoke(
+      "fetch-bgg-image",
+      {
+        body: {
+          bgg_id: game.bgg_id
+        }
+      }
+    );
+
+    const refreshed = await state.client
+      .from("bgg_games")
+      .select(`
+        bgg_id,
+        game_name,
+        rank,
+        year_published,
+        average_rating,
+        users_rated,
+        bgg_url,
+        thumbnail_url,
+        image_url
+      `)
+      .eq("bgg_id", game.bgg_id)
+      .single();
+
+    if (!refreshed.error && refreshed.data) {
+      return refreshed.data;
+    }
+
+  } catch (error) {
+    console.warn(
+      "Errore recupero immagine BGG",
+      error
+    );
+  }
+
+  return game;
+}
+async function findBggGame(name){
+
+  const r = await state.client
+    .from("bgg_games")
+    .select(`
+      bgg_id,
+      game_name,
+      rank,
+      year_published,
+      average_rating,
+      users_rated,
+      bgg_url,
+      thumbnail_url,
+      image_url
+    `)
+    .ilike("game_name", String(name).trim())
+    .not("bgg_id", "is", null)
+    .order("rank", {
+      ascending: true,
+      nullsFirst: false
+    })
+    .limit(1);
+
+  const game =
+    r.error
+      ? null
+      : r.data?.[0] || null;
+
+  if (!game) {
+    return null;
+  }
+
+  return await ensureBggImage(game);
+}
 function inputValue(selector,value){const el=$(selector);if(el)el.value=value||""}
 async function proposals(){
   const [proposalResponse,voteResponse]=await Promise.all([
