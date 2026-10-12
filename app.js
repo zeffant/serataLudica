@@ -1,12 +1,12 @@
 (() => {
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const state={client:null,session:null,players:[],currentPlayer:null,isAdmin:false,activeTab:"votes",weekStart:startWeek(new Date()),realtime:null,selectedBggGame:null,selectedResultBggGame:null,imageRequests:new Set()};
+const state={client:null,session:null,players:[],currentPlayer:null,isAdmin:false,activeTab:"votes",weekStart:startWeek(new Date()),realtime:null,selectedBggGame:null,selectedResultBggGame:null,imageRequests:new Set(),closeYearReport:null,closeYearBusy:false};
 const choices={yes:["Sì","S"],maybe:["Forse","F"],no:["No","N"]};
 const longFmt=new Intl.DateTimeFormat("it-IT",{weekday:"long",day:"numeric",month:"long"}), shortFmt=new Intl.DateTimeFormat("it-IT",{day:"2-digit",month:"2-digit"}), histFmt=new Intl.DateTimeFormat("it-IT",{day:"numeric",month:"long",year:"numeric"});
 document.addEventListener("DOMContentLoaded",init);
 async function init(){bind();weekUi();try{const c=window.SERATA_LUDICA_CONFIG;if(!c?.SUPABASE_URL||!c?.SUPABASE_ANON_KEY)throw Error("Configurazione incompleta");state.client=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});window.serataLudicaSupabase=state.client;await session();await base();subscribe();await loadTab();}catch(e){toast(errText(e),true);}finally{$("#loading").classList.add("hidden");$("#app").setAttribute("aria-busy","false");}}
-function bind(){$$("[data-tab]").forEach(b=>b.onclick=()=>openTab(b.dataset.tab));$("#go-to-player").onclick=()=>openTab("players");$("#refresh-button").onclick=async()=>{await base();await loadTab();};$("#previous-week").onclick=()=>shift(-7);$("#next-week").onclick=()=>shift(7);$("#current-week").onclick=()=>setWeek(new Date());$("#week-input").onchange=e=>{const d=weekMonday(e.target.value);if(d)setWeek(d)};$("#claim-player-button").onclick=claim;$("#proposal-form").onsubmit=proposal;prepareBggAutocomplete();$("#result-form").onsubmit=record;$("#admin-login-form").onsubmit=adminLogin;$("#admin-logout").onclick=adminLogout;$("#add-player-form").onsubmit=addPlayer;}
+function bind(){$$("[data-tab]").forEach(b=>b.onclick=()=>openTab(b.dataset.tab));$("#go-to-player").onclick=()=>openTab("players");$("#refresh-button").onclick=async()=>{await base();await loadTab();};$("#previous-week").onclick=()=>shift(-7);$("#next-week").onclick=()=>shift(7);$("#current-week").onclick=()=>setWeek(new Date());$("#week-input").onchange=e=>{const d=weekMonday(e.target.value);if(d)setWeek(d)};$("#claim-player-button").onclick=claim;$("#proposal-form").onsubmit=proposal;prepareBggAutocomplete();$("#result-form").onsubmit=record;$("#admin-login-form").onsubmit=adminLogin;$("#admin-logout").onclick=adminLogout;$("#add-player-form").onsubmit=addPlayer;$("#close-year-report").onclick=generateYearReport;$("#close-year-reset").onclick=confirmYearReset;}
 async function session(){let r=await state.client.auth.getSession();if(r.error)throw r.error;state.session=r.data.session;if(!state.session){r=await state.client.auth.signInAnonymously();if(r.error)throw r.error;state.session=r.data.session;}return state.session;}
 async function base(){await Promise.all([players(),currentPlayer(),adminState()]);renderPlayer();renderAdmin();}
 async function players(){const r=await state.client.from("players").select("id,name,active").order("name");if(r.error)throw r.error;state.players=r.data||[];}
@@ -363,6 +363,83 @@ function badgePartecipante(p){
   return `<span class="participant-badge ${role}">${icon} ${esc(p.player_name)}</span>`;
 }
 async function delResult(id){if(!confirm("Eliminare il risultato?"))return;const r=await state.client.from("game_results").delete().eq("id",id);if(r.error)return toast(errText(r.error),true);await Promise.all([history(),ranking()]);}
+async function fetchAllRows(table, columns, orderColumn){
+  const pageSize=1000;let all=[],from=0;
+  while(true){
+    let query=state.client.from(table).select(columns);
+    if(orderColumn)query=query.order(orderColumn,{ascending:true});
+    const r=await query.range(from,from+pageSize-1);
+    if(r.error)throw r.error;
+    const batch=r.data||[];all.push(...batch);
+    if(batch.length<pageSize)break;
+    from+=pageSize;
+  }
+  return all;
+}
+function buildYearReport(data, year){
+  const normalizeName=value=>String(value||"").trim().toLocaleLowerCase("it-IT").replace(/\s+/g," ");
+  const extractBggId=url=>{const m=String(url||"").match(/boardgame\/(\d+)/i);return m?m[1]:null};
+  const keyFor=(id,name)=>id?`bgg:${id}`:`name:${normalizeName(name)}`;
+  const games=new Map();
+  for(const row of data.proposals){const name=row.game_name||row.title||"Gioco senza nome",key=keyFor(row.bgg_id,name);if(!games.has(key))games.set(key,{name,proposed:0,chosen:0,bggId:row.bgg_id||null});games.get(key).proposed++;}
+  for(const row of data.history){const id=extractBggId(row.bgg_url),key=keyFor(id,row.game_name);let game=games.get(key);if(!game){const same=[...games.values()].find(g=>normalizeName(g.name)===normalizeName(row.game_name));if(same)game=same;else{game={name:row.game_name||"Gioco senza nome",proposed:0,chosen:0,bggId:id};games.set(key,game);}}game.chosen++;}
+  const sortedGames=[...games.values()].sort((a,b)=>b.chosen-a.chosen||b.proposed-a.proposed||a.name.localeCompare(b.name,"it"));
+  const escH=v=>esc(v);
+  const table=(headers, rows)=>`<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${escH(h)}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(v=>`<td>${v==null?"—":v}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">Nessun dato disponibile</td></tr>`}</tbody></table></div>`;
+  const playerRows=(data.standings||[]).map((x,i)=>[i+1,escH(x.player_name),x.wins??0,x.last_places??0,x.other_placements??0,x.presences??0,`${Number(x.win_rate||0).toLocaleString('it-IT',{minimumFractionDigits:1,maximumFractionDigits:1})}%`]);
+  const gameRows=sortedGames.map((g,i)=>[i+1,escH(g.name),g.proposed,g.chosen]);
+  const historyRows=[...data.history].sort((a,b)=>String(b.played_on||"").localeCompare(String(a.played_on||""))).map(x=>{
+    let ps=x.participants;if(typeof ps==="string"){try{ps=JSON.parse(ps)}catch{ps=[]}}if(!Array.isArray(ps))ps=[];
+    const people=ps.map(p=>p?.player_name||p?.name||p?.players?.name).filter(Boolean).join(", ");
+    return [escH(x.played_on||""),escH(x.game_name||""),x.bgg_url?`<a href="${attr(x.bgg_url)}">BGG</a>`:"—",escH(x.winner_name||""),escH(x.last_name||""),escH(people),escH(x.notes||"")];
+  });
+  const proposalRows=data.proposals.map(p=>[escH(p.week_start||""),escH(p.game_name||p.title||""),escH(p.proposed_by||""),p.votes||0,escH(p.bgg_url||"")]);
+  const votesByProposal=new Map();for(const v of data.proposalVotes){votesByProposal.set(v.proposal_id,(votesByProposal.get(v.proposal_id)||0)+1)}
+  // The proposal vote count is joined here, after the main data is safely fetched.
+  const proposals=data.proposals.map(p=>({...p,votes:votesByProposal.get(p.id)||0}));
+  const propRows=proposals.map(p=>[escH(p.week_start||""),escH(p.game_name||p.title||""),escH(p.proposed_by||""),p.votes, p.bgg_url?`<a href="${attr(p.bgg_url)}">BGG</a>`:"—"]);
+  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Serata Ludica — Archivio ${year}</title><style>
+  :root{font-family:Arial,sans-serif;color:#172033;background:#f5f7fb}body{max-width:1200px;margin:0 auto;padding:28px}h1{color:#4338ca}h2{margin-top:34px;border-bottom:2px solid #dfe3ec;padding-bottom:8px}p{line-height:1.5}.meta{color:#667085}table{border-collapse:collapse;width:100%;background:white}th,td{border-bottom:1px solid #dfe3ec;padding:9px;text-align:left;vertical-align:top}th{background:#eef2ff}td{overflow-wrap:anywhere}.table-wrap{overflow-x:auto;margin:12px 0 24px}.note{padding:12px;border:1px solid #f5cf53;background:#fff7cc;border-radius:10px}@media print{body{max-width:none;padding:0;background:white}h2{break-after:avoid}tr{break-inside:avoid}.table-wrap{overflow:visible}a{color:inherit;text-decoration:none}}
+  </style></head><body><h1>🎲 Serata Ludica — Archivio annuale ${year}</h1><p class="meta">Generato il ${escH(histFmt.format(new Date()))}. Questo report contiene tutti i dati di attività presenti nell'app al momento della generazione.</p><p class="note"><strong>Importante:</strong> conserva questo file prima di confermare l'azzeramento. Puoi stamparlo o scegliere “Salva come PDF” dal browser.</p><h2>Classifica giocatori</h2>${table(["#","Giocatore","Vittorie","Ultimi posti","Altri piazzamenti","Presenze","Win rate"],playerRows)}<h2>Classifica giochi</h2>${table(["#","Gioco","Volte proposto","Volte scelto"],gameRows)}<h2>Storico serate</h2>${table(["Data","Gioco","Link BGG","Vincitore","Ultimo classificato","Partecipanti","Note"],historyRows)}<h2>Giochi proposti</h2>${table(["Settimana","Gioco","Proposto da","Voti","Link BGG"],propRows)}<h2>Voti di disponibilità</h2>${table(["Data","Settimana","Giocatore","Voto"],data.votes.map(v=>[escH(v.vote_date||""),escH(v.week_start||""),escH(data.playerNames.get(v.player_id)||"Giocatore non disponibile"),escH(({yes:"Sì",maybe:"Forse",no:"No"})[v.choice]||v.choice||"")]))}<footer class="meta">Serata Ludica · archivio generato localmente dal browser</footer></body></html>`;
+}
+async function generateYearReport(){
+  if(!state.isAdmin)return toast("Solo l'amministratore può chiudere l'anno",true);
+  if(state.closeYearBusy)return;
+  state.closeYearBusy=true;const btn=$("#close-year-report");btn.disabled=true;btn.textContent="Preparazione report…";
+  try{
+    const [standings,history,proposals,proposalVotes,votes,playersData]=await Promise.all([
+      fetchAllRows("standings","player_name,wins,last_places,other_placements,presences,win_rate","player_name"),
+      fetchAllRows("game_history","id,played_on,game_name,bgg_url,notes,winner_name,last_name,participants,created_at","played_on"),
+      fetchAllRows("game_proposals","id,week_start,title,bgg_id,bgg_url,notes,proposed_by_player_id,created_at","created_at"),
+      fetchAllRows("game_proposal_votes","proposal_id,player_id,week_start","week_start"),
+      fetchAllRows("votes","week_start,vote_date,choice,player_id","vote_date"),
+      fetchAllRows("players","id,name,active","name")
+    ]);
+    const names=new Map(playersData.map(p=>[p.id,p.name]));
+    const proposalRows=proposals.map(p=>({...p,proposed_by:names.get(p.proposed_by_player_id)||"",game_name:p.title}));
+    const data={standings,history,proposals:proposalRows,proposalVotes,votes,playerNames:names};
+    const year=new Date().getFullYear();const report=buildYearReport(data,year);
+    state.closeYearReport={report,year,createdAt:new Date().toISOString()};
+    const blob=new Blob([report],{type:"text/html;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`serata-ludica-archivio-${year}.html`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+    $("#close-year-reset").disabled=false;$("#close-year-reset").classList.remove("hidden");$("#close-year-confirm-hint").textContent="Report generato e download avviato. Verifica di aver conservato il file, poi conferma l'azzeramento.";
+    toast("Report annuale generato");
+  }catch(e){console.error(e);toast(`Impossibile generare il report: ${errText(e)}`,true)}
+  finally{state.closeYearBusy=false;btn.disabled=false;btn.textContent="Genera e scarica report";}
+}
+async function confirmYearReset(){
+  if(!state.isAdmin)return toast("Solo l'amministratore può chiudere l'anno",true);
+  if(!state.closeYearReport)return toast("Genera prima il report annuale",true);
+  const typed=prompt(`ATTENZIONE: verranno eliminati tutti i voti, le proposte e i risultati attualmente presenti. Giocatori e catalogo BGG resteranno.\n\nIl report scaricato è l'unica copia autonoma dello storico.\n\nPer confermare, scrivi CHIUDI ${state.closeYearReport.year}`);
+  if(typed!==`CHIUDI ${state.closeYearReport.year}`) return toast("Chiusura annullata");
+  const btn=$("#close-year-reset");btn.disabled=true;btn.textContent="Azzeramento in corso…";
+  try{
+    const r=await state.client.rpc("admin_close_year");if(r.error)throw r.error;
+    state.closeYearReport=null;btn.classList.add("hidden");btn.disabled=true;$("#close-year-confirm-hint").textContent="";
+    await base();await Promise.all([ranking(),history(),proposals(),summary()]);
+    toast("Chiusura completata: attività azzerate, giocatori e catalogo conservati");
+  }catch(e){console.error(e);toast(`Azzeramento non eseguito: ${errText(e)}. Nessun dato dovrebbe essere stato cancellato se la funzione SQL è transazionale.`,true)}
+  finally{btn.disabled=false;btn.textContent="Conferma chiusura e azzera attività";}
+}
 async function adminLogin(e){e.preventDefault();const r=await state.client.rpc("admin_login",{p_pin:$("#admin-pin").value});if(r.error||!r.data)return toast("PIN non valido",true);state.isAdmin=true;renderAdmin();}
 async function adminLogout(){await state.client.rpc("admin_logout");state.isAdmin=false;renderAdmin();}
 async function addPlayer(e){e.preventDefault();const r=await state.client.from("players").insert({name:$("#new-player-name").value.trim()});if(r.error)return toast(errText(r.error),true);e.target.reset();await players();renderPlayer();await adminPlayers();}
