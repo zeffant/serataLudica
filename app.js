@@ -258,7 +258,41 @@ async function deleteProposal(id){
   await proposals();
 }
 
-async function ranking(){const r=await state.client.from("standings").select("player_name,wins,last_places,other_placements,presences,win_rate").order("wins",{ascending:false}).order("win_rate",{ascending:false});if(r.error)throw r.error;$("#ranking-content").innerHTML=`<table class="ranking-table"><thead><tr><th>#</th><th>Giocatore</th><th>Vittorie</th><th>Ultimi</th><th>Altri</th><th>Presenze</th><th>Win rate</th></tr></thead><tbody>${(r.data||[]).map((x,i)=>`<tr><td>${i+1}</td><td><strong>${esc(x.player_name)}</strong></td><td>${x.wins}</td><td>${x.last_places}</td><td>${x.other_placements}</td><td>${x.presences}</td><td><strong>${Number(x.win_rate||0).toLocaleString('it-IT',{minimumFractionDigits:1,maximumFractionDigits:1})}%</strong></td></tr>`).join("")}</tbody></table>`;}
+async function ranking(){
+  const [playersResult, proposalsResult, historyResult]=await Promise.all([
+    state.client.from("standings").select("player_name,wins,last_places,other_placements,presences,win_rate").order("wins",{ascending:false}).order("win_rate",{ascending:false}),
+    state.client.from("game_proposals").select("title,bgg_id,bgg_games(game_name)"),
+    state.client.from("game_history").select("game_name,bgg_url")
+  ]);
+  if(playersResult.error)throw playersResult.error;
+  if(proposalsResult.error)throw proposalsResult.error;
+  if(historyResult.error)throw historyResult.error;
+  $("#ranking-content").innerHTML=`<table class="ranking-table"><thead><tr><th>#</th><th>Giocatore</th><th>Vittorie</th><th>Ultimi</th><th>Altri</th><th>Presenze</th><th>Win rate</th></tr></thead><tbody>${(playersResult.data||[]).map((x,i)=>`<tr><td>${i+1}</td><td><strong>${esc(x.player_name)}</strong></td><td>${x.wins}</td><td>${x.last_places}</td><td>${x.other_placements}</td><td>${x.presences}</td><td><strong>${Number(x.win_rate||0).toLocaleString('it-IT',{minimumFractionDigits:1,maximumFractionDigits:1})}%</strong></td></tr>`).join("")}</tbody></table>`;
+
+  const normalizeName=value=>String(value||"").trim().toLocaleLowerCase("it-IT").replace(/\s+/g," ");
+  const extractBggId=url=>{const m=String(url||"").match(/boardgame\/(\d+)/i);return m?m[1]:null};
+  const keyFor=(id,name)=>id?`bgg:${id}`:`name:${normalizeName(name)}`;
+  const games=new Map();
+  for(const row of proposalsResult.data||[]){
+    const name=row.bgg_games?.game_name||row.title||"Gioco senza nome";
+    const key=keyFor(row.bgg_id,name);
+    if(!games.has(key))games.set(key,{name,proposed:0,chosen:0,bggId:row.bgg_id||null});
+    games.get(key).proposed++;
+  }
+  for(const row of historyResult.data||[]){
+    const id=extractBggId(row.bgg_url);
+    const key=keyFor(id,row.game_name);
+    let game=games.get(key);
+    if(!game){
+      const sameName=[...games.values()].find(g=>normalizeName(g.name)===normalizeName(row.game_name));
+      if(sameName)game=sameName;
+      else {game={name:row.game_name||"Gioco senza nome",proposed:0,chosen:0,bggId:id};games.set(key,game);}
+    }
+    game.chosen++;
+  }
+  const sorted=[...games.values()].sort((a,b)=>b.chosen-a.chosen||b.proposed-a.proposed||a.name.localeCompare(b.name,"it"));
+  $("#ranking-games-content").innerHTML=sorted.length?`<table class="ranking-table game-ranking-table"><thead><tr><th>#</th><th>Gioco</th><th>Volte proposto</th><th>Volte scelto</th></tr></thead><tbody>${sorted.map((g,i)=>`<tr><td>${i+1}</td><td>${g.bggId?`<a href="https://boardgamegeek.com/boardgame/${attr(g.bggId)}" target="_blank" rel="noopener noreferrer">${esc(g.name)} ↗</a>`:esc(g.name)}</td><td>${g.proposed}</td><td><strong>${g.chosen}</strong></td></tr>`).join("")}</tbody></table>`:'<div class="empty-state">Non ci sono ancora proposte o giochi nello storico.</div>';
+}
 function fillResult(){const a=state.players.filter(p=>p.active),opts='<option value="">Scegli…</option>'+a.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");$("#result-winner").innerHTML=opts;$("#result-last").innerHTML=opts;$("#result-participants").innerHTML=a.map(p=>`<label class="participant-option"><input type="checkbox" name="participant" value="${p.id}"><span>${esc(p.name)}</span></label>`).join("");if(!$("#result-date").value)$("#result-date").value=iso(new Date());}
 async function record(e){e.preventDefault();const participantIds=$$('[name="participant"]:checked').map(x=>x.value),winner=$("#result-winner").value,last=$("#result-last").value;if(participantIds.length<2)return toast("Seleziona almeno due partecipanti",true);if(!winner||!last)return toast("Seleziona vincitore e ultimo classificato",true);if(winner===last)return toast("Vincitore e ultimo devono essere diversi",true);if(!participantIds.includes(winner)||!participantIds.includes(last))return toast("Vincitore e ultimo devono essere partecipanti",true);const r=await state.client.rpc("admin_create_game_result",{p_played_on:$("#result-date").value,p_game_name:$("#result-game").value.trim(),p_bgg_url:$("#result-url").value.trim()||null,p_notes:$("#result-notes").value.trim()||null,p_winner_player_id:winner,p_last_player_id:last,p_participant_ids:participantIds});if(r.error)return toast(errText(r.error),true);e.target.reset();fillResult();await Promise.all([history(),ranking()]);toast("Risultato registrato");}
 async function history(){
@@ -269,13 +303,32 @@ async function history(){
   if(r.error)throw r.error;
   const rows=r.data||[];
   if(!rows.length){$("#history-list").innerHTML='<div class="empty-state">Lo storico è vuoto.</div>';return;}
+
+  // Risolve i giochi già presenti nello storico tramite ID BGG nel link o titolo esatto.
+  const ids=[...new Set(rows.map(x=>{const m=String(x.bgg_url||"").match(/boardgame\/(\d+)/i);return m?.[1]||null}).filter(Boolean))];
+  const names=[...new Set(rows.map(x=>String(x.game_name||"").trim()).filter(Boolean))];
+  let bggGames=[];
+  if(ids.length){const byId=await state.client.from("bgg_games").select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url").in("bgg_id",ids);if(!byId.error)bggGames.push(...(byId.data||[]));}
+  if(names.length){const byName=await state.client.from("bgg_games").select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url").in("game_name",names).not("bgg_id","is",null);if(!byName.error)bggGames.push(...(byName.data||[]));}
+  const byId=new Map(bggGames.map(g=>[String(g.bgg_id),g]));
+  const byName=new Map(bggGames.map(g=>[String(g.game_name||"").trim().toLocaleLowerCase("it-IT"),g]));
+  for(const x of rows){
+    const match=String(x.bgg_url||"").match(/boardgame\/(\d+)/i);
+    let game=(match&&byId.get(match[1]))||byName.get(String(x.game_name||"").trim().toLocaleLowerCase("it-IT"));
+    if(!game){game=await findBggGame(x.game_name);if(game){bggGames.push(game);byId.set(String(game.bgg_id),game);byName.set(String(game.game_name||"").trim().toLocaleLowerCase("it-IT"),game);}}
+    if(game?.bgg_id&&!game.thumbnail_url&&!game.image_url)game=await ensureBggImage(game);
+    x._bgg=game||null;
+  }
+
   $("#history-list").innerHTML=rows.map(x=>{
-    const ps=normalizzaPartecipanti(x.participants,x.winner_name,x.last_name);
-    return `<article class="list-card">
-      <div class="list-card-header"><div><h3>${esc(x.game_name)}</h3><div class="meta">${histFmt.format(fromIso(x.played_on))} · ${ps.length} ${ps.length===1?'presenza':'presenze'}</div></div>${state.isAdmin?`<button class="danger-button" data-del="${x.id}">Elimina</button>`:''}</div>
-      ${x.bgg_url?`<p><a href="${attr(x.bgg_url)}" target="_blank" rel="noopener noreferrer">BoardGameGeek ↗</a></p>`:''}
-      <div class="history-participants">${ps.map(p=>badgePartecipante(p)).join("")}</div>
-      ${x.notes?`<p class="notes">${esc(x.notes)}</p>`:''}
+    const ps=normalizzaPartecipanti(x.participants,x.winner_name,x.last_name),g=x._bgg,img=g?.thumbnail_url||g?.image_url;
+    const bggUrl=x.bgg_url||g?.bgg_url||(g?.bgg_id?`https://boardgamegeek.com/boardgame/${g.bgg_id}`:null);
+    return `<article class="list-card history-game-card ${img?'has-image':'no-image'}">
+      ${img?`<div class="game-visual"><img class="game-thumb" src="${attr(img)}" alt="Copertina di ${attr(x.game_name)}" loading="lazy"></div>`:`<div class="game-visual"><div class="game-placeholder" aria-label="Copertina non disponibile">🎲</div></div>`}
+      <div class="game-content"><div class="list-card-header"><div><h3>${esc(x.game_name)}</h3><div class="meta">${histFmt.format(fromIso(x.played_on))} · ${ps.length} ${ps.length===1?'presenza':'presenze'}</div></div>${state.isAdmin?`<button class="danger-button" data-del="${x.id}">Elimina</button>`:''}</div>
+      ${g?`<div class="bgg-stats"><span>⭐ ${g.average_rating?Number(g.average_rating).toFixed(1):"-"}</span><span>🏅 #${g.rank||"-"}</span><span>📅 ${g.year_published||"-"}</span></div>`:""}
+      ${bggUrl?`<p><a href="${attr(bggUrl)}" target="_blank" rel="noopener noreferrer">BoardGameGeek ↗</a></p>`:""}
+      <div class="history-participants">${ps.map(p=>badgePartecipante(p)).join("")}</div>${x.notes?`<p class="notes">${esc(x.notes)}</p>`:""}</div>
     </article>`;
   }).join("");
   $$('[data-del]').forEach(b=>b.onclick=()=>delResult(b.dataset.del));

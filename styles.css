@@ -402,3 +402,10 @@ tr:last-child td { border-bottom: 0; }
     text-align: right;
   }
 }
+
+/* Storico: schede con copertina BGG e classifica giochi */
+.history-game-card { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; }
+.history-game-card .game-content { min-width: 0; }
+.history-game-card.no-image .game-visual { display: block; }
+.game-ranking-table { min-width: 520px; }
+@media (max-width: 520px) { .history-game-card { grid-template-columns: 76px minmax(0, 1fr); gap: 11px; } }
