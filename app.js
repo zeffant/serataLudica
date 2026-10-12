@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const state={client:null,session:null,players:[],currentPlayer:null,isAdmin:false,activeTab:"votes",weekStart:startWeek(new Date()),realtime:null,selectedBggGame:null,imageRequests:new Set()};
+const state={client:null,session:null,players:[],currentPlayer:null,isAdmin:false,activeTab:"votes",weekStart:startWeek(new Date()),realtime:null,selectedBggGame:null,selectedResultBggGame:null,imageRequests:new Set()};
 const choices={yes:["Sì","S"],maybe:["Forse","F"],no:["No","N"]};
 const longFmt=new Intl.DateTimeFormat("it-IT",{weekday:"long",day:"numeric",month:"long"}), shortFmt=new Intl.DateTimeFormat("it-IT",{day:"2-digit",month:"2-digit"}), histFmt=new Intl.DateTimeFormat("it-IT",{day:"numeric",month:"long",year:"numeric"});
 document.addEventListener("DOMContentLoaded",init);
@@ -59,44 +59,37 @@ async function proposal(e){
   toast(game?"Gioco proposto con dati BoardGameGeek associati":"Gioco proposto");
 }
 function prepareBggAutocomplete(){
-  const input=$("#proposal-title"),url=$("#proposal-url");if(!input)return;
-  input.setAttribute("autocomplete","off");input.setAttribute("enterkeyhint","search");
-  let box=$("#bgg-suggestions-mobile");if(!box){box=document.createElement("div");box.id="bgg-suggestions-mobile";box.className="bgg-suggestions hidden";box.setAttribute("role","listbox");input.insertAdjacentElement("afterend",box)}
-  let timer;input.addEventListener("input",()=>{state.selectedBggGame=null;clearTimeout(timer);timer=setTimeout(()=>loadBggSuggestions(input.value),250)});
-  input.addEventListener("blur",()=>setTimeout(()=>box.classList.add("hidden"),180));input.addEventListener("focus",()=>{if(box.children.length)box.classList.remove("hidden")});
+  setupBggAutocomplete("#proposal-title", "#proposal-url", "bgg-suggestions-proposal", "selectedBggGame");
+  setupBggAutocomplete("#result-game", "#result-url", "bgg-suggestions-result", "selectedResultBggGame");
 }
-async function loadBggSuggestions(term){
-  const box=$("#bgg-suggestions-mobile");
+function setupBggAutocomplete(inputSelector, urlSelector, boxId, stateKey){
+  const input=$(inputSelector),url=$(urlSelector);if(!input)return;
+  input.setAttribute("autocomplete","off");input.setAttribute("enterkeyhint","search");
+  let box=$("#"+boxId);if(!box){box=document.createElement("div");box.id=boxId;box.className="bgg-suggestions hidden";box.setAttribute("role","listbox");input.insertAdjacentElement("afterend",box)}
+  let timer;input.addEventListener("input",()=>{state[stateKey]=null;clearTimeout(timer);timer=setTimeout(()=>loadBggSuggestions(input.value,input,url,box,stateKey),250)});
+  input.addEventListener("blur",()=>setTimeout(()=>box.classList.add("hidden"),180));
+  input.addEventListener("focus",()=>{if(box.children.length)box.classList.remove("hidden")});
+}
+async function loadBggSuggestions(term,input,url,box,stateKey){
   const q=String(term||"").trim();
-  if(!box||q.length<2){
-    if(box){box.innerHTML="";box.classList.add("hidden")}
-    return;
-  }
-
+  if(!box||q.length<2){if(box){box.innerHTML="";box.classList.add("hidden")}return;}
   const r=await state.client.from("bgg_games")
     .select("bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url")
-    .ilike("game_name",`%${q}%`)
-    .not("bgg_id","is",null)
-    .order("rank",{ascending:true,nullsFirst:false})
-    .limit(12);
-
-  if(r.error){console.warn("Autocomplete BGG",r.error);return}
+    .ilike("game_name",`%${q}%`).not("bgg_id","is",null)
+    .order("rank",{ascending:true,nullsFirst:false}).limit(12);
+  if(r.error){console.warn("Autocomplete BGG",r.error);box.classList.add("hidden");return;}
   const games=r.data||[];
-
   box.innerHTML=games.map((g,i)=>`<button type="button" class="bgg-suggestion" data-bgg-index="${i}"><strong>${esc(g.game_name)}</strong><span>${g.rank?`#${g.rank} · `:""}${g.year_published||""}${g.average_rating?` · ⭐ ${Number(g.average_rating).toFixed(1)}`:""}</span></button>`).join("");
   box.classList.toggle("hidden",!games.length);
-
   box.querySelectorAll("[data-bgg-index]").forEach(button=>button.addEventListener("pointerdown",async event=>{
     event.preventDefault();
-    const index=Number(button.dataset.bggIndex);
-    let game=games[index];
-    inputValue("#proposal-title",game.game_name);
-    inputValue("#proposal-url",game.bgg_url||`https://boardgamegeek.com/boardgame/${game.bgg_id}`);
+    let game=games[Number(button.dataset.bggIndex)];
+    input.value=game.game_name;
+    if(url)url.value=game.bgg_url||`https://boardgamegeek.com/boardgame/${game.bgg_id}`;
     box.classList.add("hidden");
-
+    state[stateKey]=game;
     game=await ensureBggImage(game);
-    games[index]=game;
-    state.selectedBggGame=game;
+    state[stateKey]=game;
   }));
 }
 async function ensureBggImage(game){
@@ -294,7 +287,23 @@ async function ranking(){
   $("#ranking-games-content").innerHTML=sorted.length?`<table class="ranking-table game-ranking-table"><thead><tr><th>#</th><th>Gioco</th><th>Volte proposto</th><th>Volte scelto</th></tr></thead><tbody>${sorted.map((g,i)=>`<tr><td>${i+1}</td><td>${g.bggId?`<a href="https://boardgamegeek.com/boardgame/${attr(g.bggId)}" target="_blank" rel="noopener noreferrer">${esc(g.name)} ↗</a>`:esc(g.name)}</td><td>${g.proposed}</td><td><strong>${g.chosen}</strong></td></tr>`).join("")}</tbody></table>`:'<div class="empty-state">Non ci sono ancora proposte o giochi nello storico.</div>';
 }
 function fillResult(){const a=state.players.filter(p=>p.active),opts='<option value="">Scegli…</option>'+a.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join("");$("#result-winner").innerHTML=opts;$("#result-last").innerHTML=opts;$("#result-participants").innerHTML=a.map(p=>`<label class="participant-option"><input type="checkbox" name="participant" value="${p.id}"><span>${esc(p.name)}</span></label>`).join("");if(!$("#result-date").value)$("#result-date").value=iso(new Date());}
-async function record(e){e.preventDefault();const participantIds=$$('[name="participant"]:checked').map(x=>x.value),winner=$("#result-winner").value,last=$("#result-last").value;if(participantIds.length<2)return toast("Seleziona almeno due partecipanti",true);if(!winner||!last)return toast("Seleziona vincitore e ultimo classificato",true);if(winner===last)return toast("Vincitore e ultimo devono essere diversi",true);if(!participantIds.includes(winner)||!participantIds.includes(last))return toast("Vincitore e ultimo devono essere partecipanti",true);const r=await state.client.rpc("admin_create_game_result",{p_played_on:$("#result-date").value,p_game_name:$("#result-game").value.trim(),p_bgg_url:$("#result-url").value.trim()||null,p_notes:$("#result-notes").value.trim()||null,p_winner_player_id:winner,p_last_player_id:last,p_participant_ids:participantIds});if(r.error)return toast(errText(r.error),true);e.target.reset();fillResult();await Promise.all([history(),ranking()]);toast("Risultato registrato");}
+async function record(e){
+  e.preventDefault();
+  const participantIds=$$('[name="participant"]:checked').map(x=>x.value),winner=$("#result-winner").value,last=$("#result-last").value;
+  if(participantIds.length<2)return toast("Seleziona almeno due partecipanti",true);
+  if(!winner||!last)return toast("Seleziona vincitore e ultimo classificato",true);
+  if(winner===last)return toast("Vincitore e ultimo devono essere diversi",true);
+  if(!participantIds.includes(winner)||!participantIds.includes(last))return toast("Vincitore e ultimo devono essere partecipanti",true);
+  const title=$("#result-game").value.trim();
+  let game=state.selectedResultBggGame?.game_name?.toLocaleLowerCase("it-IT")===title.toLocaleLowerCase("it-IT")?state.selectedResultBggGame:await findBggGame(title);
+  const manualUrl=$("#result-url").value.trim();
+  const bggUrl=manualUrl||game?.bgg_url||(game?.bgg_id?`https://boardgamegeek.com/boardgame/${game.bgg_id}`:null);
+  const r=await state.client.rpc("admin_create_game_result",{p_played_on:$("#result-date").value,p_game_name:title,p_bgg_url:bggUrl,p_notes:$("#result-notes").value.trim()||null,p_winner_player_id:winner,p_last_player_id:last,p_participant_ids:participantIds});
+  if(r.error)return toast(errText(r.error),true);
+  e.target.reset();state.selectedResultBggGame=null;fillResult();
+  const box=$("#bgg-suggestions-result");if(box){box.innerHTML="";box.classList.add("hidden")}
+  await Promise.all([history(),ranking()]);toast(game?"Risultato registrato con gioco BGG associato":"Risultato registrato");
+}
 async function history(){
   const r=await state.client.from("game_history")
     .select("id,played_on,game_name,bgg_url,notes,winner_name,last_name,participants,created_at")
