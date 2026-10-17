@@ -30,11 +30,17 @@ async function suggestNextWeekFromHistory(){
 async function loadLibrary() {
   const r = await state.client
     .from("available_games")
-    .select("id, bgg_id, ideal_players, game_length, created_at, bgg_games!inner(bgg_id, game_name, rank, year_published, average_rating, users_rated, bgg_url, thumbnail_url, image_url)")
-    .order("game_name", { referencedTable: "bgg_games", ascending: true });
+    .select("id, bgg_id, ideal_players, game_length, created_at, bgg_games(bgg_id, game_name, rank, year_published, average_rating, users_rated, bgg_url, thumbnail_url, image_url)");
 
   if (r.error) throw r.error;
-  state.libraryGames = r.data || [];
+
+  // Ordina i risultati in JavaScript in base a game_name della tabella correlata
+  state.libraryGames = (r.data || []).sort((a, b) => {
+    const nameA = a.bgg_games?.game_name || "";
+    const nameB = b.bgg_games?.game_name || "";
+    return nameA.localeCompare(nameB, 'it', { sensitivity: 'accent' });
+  });
+
   renderLibrary();
 }
 function renderLibrary(){
