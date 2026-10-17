@@ -28,9 +28,14 @@ async function suggestNextWeekFromHistory(){
   else state.weekStart=startWeek(new Date());
 }
 async function loadLibrary() {
-  const r = await state.client.from("available_games").select("id,bgg_id,ideal_players,game_length,created_at,bgg_games(bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url)").order("game_name", { referencedTable: "bgg_games", ascending: true });
+  const r = await state.client
+    .from("available_games")
+    .select("id, bgg_id, ideal_players, game_length, created_at, bgg_games!inner(bgg_id, game_name, rank, year_published, average_rating, users_rated, bgg_url, thumbnail_url, image_url)")
+    .order("game_name", { referencedTable: "bgg_games", ascending: true });
+
   if (r.error) throw r.error;
-  state.libraryGames = r.data || [];renderLibrary();
+  state.libraryGames = r.data || [];
+  renderLibrary();
 }
 function renderLibrary(){
   const target=$("#library-list");if(!target)return;
