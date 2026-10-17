@@ -28,7 +28,7 @@ async function suggestNextWeekFromHistory(){
   else state.weekStart=startWeek(new Date());
 }
 async function loadLibrary(){
-  const r=await state.client.from("available_games").select("id,bgg_id,ideal_players,game_length,created_at,bgg_games(bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url)").order("created_at",{ascending:false});
+  const r=await state.client.from("available_games").select("id,bgg_id,ideal_players,game_length,created_at,bgg_games(bgg_id,game_name,rank,year_published,average_rating,users_rated,bgg_url,thumbnail_url,image_url)").order("game_name", { referencedTable: "bgg_games", ascending: true });
   if(r.error)throw r.error;
   state.libraryGames=r.data||[];renderLibrary();
 }
@@ -37,7 +37,7 @@ function renderLibrary(){
   const pf=$("#library-filter-players")?.value||"all",lf=$("#library-filter-length")?.value||"all";
   const rows=(state.libraryGames||[]).filter(x=>(pf==="all"||(Array.isArray(x.ideal_players)?x.ideal_players:[x.ideal_players]).includes(pf))&&(lf==="all"||x.game_length===lf));
   if(!rows.length){target.innerHTML='<div class="empty-state">Nessun gioco trovato con questi filtri.</div>';return;}
-  target.innerHTML=rows.map(x=>{const g=x.bgg_games||{},img=g.thumbnail_url||g.image_url,pl=(Array.isArray(x.ideal_players)?x.ideal_players:[x.ideal_players]).map(v=>v==="gt5"?">5":v).join(", ")+" giocatori",len=libraryLength[x.game_length]||libraryLength.regular;const bgg=g.bgg_url||`https://boardgamegeek.com/boardgame/${x.bgg_id}`;return `<article class="list-card library-card">${img?`<img class="game-thumb" src="${attr(img)}" alt="Copertina di ${attr(g.game_name||'gioco')}" loading="lazy">`:'<div class="game-placeholder">🎲</div>'}<div class="library-card-content"><h3>${esc(g.game_name||"Gioco BGG "+x.bgg_id)}</h3><div class="library-tags"><span class="pill">👥 ${pl}</span><span class="pill length-${x.game_length}">${len.label}</span></div>${g.average_rating?`<p class="meta">⭐ ${Number(g.average_rating).toFixed(1)} · ${g.year_published||"Anno n/d"}</p>`:""}<p><a href="${attr(bgg)}" target="_blank" rel="noopener noreferrer">Scheda BoardGameGeek ↗</a></p><button type="button" class="primary-button propose-library-button" data-library-id="${x.id}" ${state.currentPlayer?.active?"":"disabled"}>Proponi per ${esc(weekRangeLabel())}</button>${state.isAdmin?`<button type="button" class="danger-button library-remove" data-library-remove="${x.id}">Rimuovi dalla Ludoteca</button>`:""}</div></article>`}).join("");
+  target.innerHTML=rows.map(x=>{const g=x.bgg_games||{},img=g.thumbnail_url||g.image_url,pl=(Array.isArray(x.ideal_players)?x.ideal_players:[x.ideal_players]).map(v=>v==="gt5"?">5":v).join(", ")+" giocatori",len=libraryLength[x.game_length]||libraryLength.regular;const bgg=g.bgg_url||`https://boardgamegeek.com/boardgame/${x.bgg_id}`;return `<article class="list-card library-card">${img?`<img class="game-thumb" src="${attr(img)}" alt="Copertina di ${attr(g.game_name||'gioco')}" loading="lazy">`:'<div class="game-placeholder">🎲</div>'}<div class="library-card-content"><h3>${esc(g.game_name||"Gioco BGG "+x.bgg_id)}</h3><div class="library-tags"><span class="pill">👥 ${pl}</span><span class="pill length-${x.game_length}">${len.label}</span></div>${g.average_rating?`<p class="meta">⭐ ${Number(g.average_rating).toFixed(1)} · ${g.year_published||"Anno n/d"}</p>`:""}<p><a href="${attr(bgg)}" target="_blank" rel="noopener noreferrer">Scheda BoardGameGeek ↗</a></p><button type="button" class="primary-button propose-library-button" data-library-id="${x.id}" ${state.currentPlayer?.active?"":"disabled"}>Proponi per ${esc(weekRangeLabel())}</button>${state.isAdmin?`<button type="button" class="danger-button library-remove" data-library-remove="${x.id}">Rimuovi dal Kallax</button>`:""}</div></article>`}).join("");
   $$('[data-library-id]').forEach(b=>b.onclick=()=>proposeLibraryGame(b.dataset.libraryId));
   $$('[data-library-remove]').forEach(b=>b.onclick=()=>removeLibraryGame(b.dataset.libraryRemove));
 }
@@ -49,8 +49,8 @@ async function addLibraryGame(e){
   const idealPlayers=$$('input[name="library-players"]:checked').map(el=>el.value);
   if(!idealPlayers.length)return toast("Seleziona almeno un numero ideale di giocatori",true);
   const row={bgg_id:game.bgg_id,ideal_players:idealPlayers,game_length:$("#library-length").value,created_by:state.session?.user?.id||null};
-  const r=await state.client.from("available_games").insert(row);if(r.error){if(r.code==="23505")return toast("Questo gioco è già presente nella Ludoteca",true);return toast(errText(r.error),true);}
-  e.target.reset();state.selectedLibraryBggGame=null;const box=$("#bgg-suggestions-library");if(box){box.innerHTML="";box.classList.add("hidden")}await loadLibrary();toast("Gioco aggiunto alla Ludoteca!");
+  const r=await state.client.from("available_games").insert(row);if(r.error){if(r.code==="23505")return toast("Questo gioco è già presente nel Kallax",true);return toast(errText(r.error),true);}
+  e.target.reset();state.selectedLibraryBggGame=null;const box=$("#bgg-suggestions-library");if(box){box.innerHTML="";box.classList.add("hidden")}await loadLibrary();toast("Gioco aggiunto al Kallax!");
 }
 async function proposeLibraryGame(id){
   if(!state.currentPlayer?.active)return toast("Seleziona prima il tuo giocatore",true);
@@ -59,11 +59,11 @@ async function proposeLibraryGame(id){
   const existing=await state.client.from("game_proposals").select("id").eq("week_start",iso(state.weekStart)).eq("bgg_id",x.bgg_id).limit(1);
   if(existing.error)return toast(errText(existing.error),true);
   if(existing.data?.length)return toast("Questo gioco è già stato proposto per la settimana selezionata",true);
-  const r=await state.client.from("game_proposals").insert({week_start:iso(state.weekStart),title,bgg_id:x.bgg_id,bgg_url:g.bgg_url||`https://boardgamegeek.com/boardgame/${x.bgg_id}`,notes:`Dalla Ludoteca · ${libraryLength[x.game_length]?.short||"Regular"} · Ideale per ${(Array.isArray(x.ideal_players)?x.ideal_players:[x.ideal_players]).map(v=>v==="gt5"?">5":v).join(", ")} giocatori`,proposed_by_player_id:state.currentPlayer.id});
+  const r=await state.client.from("game_proposals").insert({week_start:iso(state.weekStart),title,bgg_id:x.bgg_id,bgg_url:g.bgg_url||`https://boardgamegeek.com/boardgame/${x.bgg_id}`,notes:`Dal Kallax · ${libraryLength[x.game_length]?.short||"Regular"} · Ideale per ${(Array.isArray(x.ideal_players)?x.ideal_players:[x.ideal_players]).map(v=>v==="gt5"?">5":v).join(", ")} giocatori`,proposed_by_player_id:state.currentPlayer.id});
   if(r.error)return toast(errText(r.error),true);
   toast(`Proposta aggiunta per la settimana ${weekRangeLabel()}`);await openTab("games");
 }
-async function removeLibraryGame(id){if(!state.isAdmin||!confirm("Rimuovere questo gioco dalla Ludoteca? Lo storico e le proposte già create non verranno eliminati."))return;const r=await state.client.from("available_games").delete().eq("id",id);if(r.error)return toast(errText(r.error),true);await loadLibrary();toast("Gioco rimosso dalla Ludoteca");}
+async function removeLibraryGame(id){if(!state.isAdmin||!confirm("Rimuovere questo gioco dal Kallax? Lo storico e le proposte già create non verranno eliminati."))return;const r=await state.client.from("available_games").delete().eq("id",id);if(r.error)return toast(errText(r.error),true);await loadLibrary();toast("Gioco rimosso dal Kallax");}
 
 async function proposal(e){
   e.preventDefault();
